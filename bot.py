@@ -21,7 +21,6 @@ log_dir = os.path.join(TEMP_DIR, LOG_DIR)
 os.makedirs(log_dir, exist_ok=True)
 
 
-
 def configure_logging():
     logging.basicConfig(
         level=logging.INFO,
