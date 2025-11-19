@@ -1,0 +1,88 @@
+# Ignore VS Code settings
+.vscode/
+
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore environment files
+.env
+.env.*
+.env.local
+.envrc
+.env.production
+.env.*.local
+
+# Ignore configuration and secrets
+config/*.json
+config/*.yml
+config/*.yaml
+config/*.ini
+config/*.env
+config/secrets*
+config_manager.py
+config.py
+secrets.*
+*.secret
+credentials
+*.creds
+
+# Cloud provider credentials
+.aws/
+.aws/credentials
+.gcloud/
+google-credentials.json
+azureCredentials.json
+
+# Keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+id_rsa
+id_dsa
+*.pem.enc
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor/temp files
+*.swp
+*~
+.history
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# Node modules
+node_modules/
+
+# Build / coverage
+dist/
+build/
+.coverage
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Static / web files to hide
+index.html
+main.css
+
+# Server code to hide
+web_server.py
