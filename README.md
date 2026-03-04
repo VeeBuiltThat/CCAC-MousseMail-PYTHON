@@ -10,6 +10,7 @@ A lightweight Discord mod-mail / ticketing bot that lets users open private tick
 - Configuration
 - Usage
 - Bot commands
+- Transcript Viewer
 - Development
 - Troubleshooting
 - Contributing
@@ -25,6 +26,7 @@ Users can DM the bot to open a private ticket channel inside a configured catego
 - Staff-only commands to reply, edit replies, move tickets
 - Pre-made replies (dx)
 - Config-driven (server IDs, category IDs, bot token)
+- **Streamlit Transcript Viewer** — Staff-only web UI to browse, search, and filter transcripts with image rendering and internal note toggling
 
 ## Requirements
 - Python 3.10+ recommended
@@ -83,6 +85,24 @@ Then:
 - `%dx` — Show pre-made replies / canned responses.
 
 Adjust command names and behavior to match your bot's implementation if they differ.
+
+## Transcript Viewer
+A Streamlit web app for staff to view, filter, and manage ticket transcripts.
+
+**Features:**
+- Browse local transcript files or query database (PostgreSQL/MySQL)
+- View embedded images and attachments
+- Separate user vs. staff messages
+- Hide/show internal staff notes with a toggle
+- Staff authentication required
+
+**Quick Start:**
+```bash
+export STREAMLIT_STAFF_PASSWORD="your_password"
+streamlit run streamlit_transcripts.py
+```
+
+For full setup and configuration, see [TRANSCRIPT_VIEWER_README.md](TRANSCRIPT_VIEWER_README.md).
 
 ## Development
 - Code style: follow existing project conventions.

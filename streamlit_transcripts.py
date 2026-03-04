@@ -162,7 +162,7 @@ def main():
             if submitted:
                 if staff_password and pwd == staff_password:
                     st.session_state.authenticated = True
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("Invalid password. Set STREAMLIT_STAFF_PASSWORD or staff_password in secrets.")
         st.stop()
