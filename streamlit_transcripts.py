@@ -6,6 +6,13 @@ from PIL import Image
 from typing import List, Dict, Any
 
 try:
+    import mysql.connector
+    from mysql.connector import Error
+    MYSQL_AVAILABLE = True
+except Exception:
+    MYSQL_AVAILABLE = False
+
+try:
     from sqlalchemy import create_engine, inspect, text
     SQLALCHEMY_AVAILABLE = True
 except Exception:
@@ -14,6 +21,15 @@ except Exception:
 
 DEFAULT_TRANSCRIPT_DIRS = ["transcripts", "logs"]
 DEFAULT_IMAGE_DIRS = ["transcripts/images", "logs/images", "images"]
+
+# MySQL Database configuration (same as bot)
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST", "gameswaw5.bisecthosting.com"),
+    "port": int(os.getenv("DB_PORT", "3306")),
+    "user": os.getenv("DB_USER", "u1079393_bwVUJntzFf"),
+    "password": os.getenv("DB_PASS", "XzaXNWotYim7AWlIeudHjSoO"),
+    "database": os.getenv("DB_NAME", "s1079393_ModMail"),
+}
 
 
 def find_dir(candidates: List[str]) -> Path:
@@ -122,7 +138,30 @@ def render_messages(messages: List[Dict[str, Any]], image_root: Path, staff_iden
                 st.markdown(f"Attachment: [{url}]({url})")
 
 
-def try_query_db(url: str):
+def query_mysql_tickets():
+    """Query active_tickets from MySQL database."""
+    if not MYSQL_AVAILABLE:
+        st.error("mysql-connector-python not installed. Install: pip install mysql-connector-python")
+        return None
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT channel_id, user_id, member_username, mod_username, category_id, created_at, closed_at, status FROM active_tickets ORDER BY created_at DESC LIMIT 500"
+        )
+        tickets = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return tickets
+    except Error as e:
+        st.error(f"Database error: {e}")
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+    return None
+
+
+def query_custom_url(url: str):
+    """Query arbitrary database via SQLAlchemy."""
     if not SQLALCHEMY_AVAILABLE:
         st.error("SQLAlchemy not installed. Database support unavailable.")
         return None
@@ -140,9 +179,12 @@ def try_query_db(url: str):
     return None
 
 
+
+
+
 def main():
     st.set_page_config(page_title="Transcript Viewer", layout="wide")
-    st.title("Transcript Viewer")
+    st.title("📋 Transcript Viewer")
 
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
@@ -156,7 +198,7 @@ def main():
 
     if not st.session_state.authenticated:
         with st.sidebar.form("login"):
-            st.write("Staff sign-in")
+            st.write("🔐 Staff sign-in")
             pwd = st.text_input("Password", type="password")
             submitted = st.form_submit_button("Sign in")
             if submitted:
@@ -167,9 +209,13 @@ def main():
                     st.error("Invalid password. Set STREAMLIT_STAFF_PASSWORD or staff_password in secrets.")
         st.stop()
 
-    st.sidebar.success("Authenticated")
+    st.sidebar.success("✅ Authenticated")
 
-    source = st.sidebar.radio("Data source", ("Local files", "Database"))
+    source = st.sidebar.radio(
+        "Data source",
+        ("MySQL Database", "Local files", "Custom URL"),
+        help="MySQL is primary, Local files as fallback, Custom URL for other databases"
+    )
 
     staff_ids_input = st.sidebar.text_input("Staff identifier substrings (comma-separated)", value="mod,staff,admin")
     staff_identifiers = [s.strip() for s in staff_ids_input.split(",") if s.strip()]
@@ -179,13 +225,58 @@ def main():
 
     show_internal = st.sidebar.checkbox("Show internal notes", value=False)
 
-    if source == "Local files":
+    if source == "MySQL Database":
+        st.sidebar.markdown(f"**Database:** `{DB_CONFIG['host']}/{DB_CONFIG['database']}`")
+        tickets = query_mysql_tickets()
+        if not tickets:
+            st.info("No tickets found in database.")
+            return
+        
+        st.markdown(f"### Tickets from Database ({len(tickets)} total)")
+        
+        for ticket in tickets:
+            channel_id = ticket.get("channel_id")
+            user_id = ticket.get("user_id")
+            member = ticket.get("member_username", "Unknown")
+            mod = ticket.get("mod_username", "Unassigned")
+            status = ticket.get("status", "unknown").upper()
+            created = ticket.get("created_at", "")
+            closed = ticket.get("closed_at", "")
+            
+            status_color = "🟢" if status == "OPEN" else "🔴"
+            
+            with st.expander(f"{status_color} #{channel_id} · {member} · {status}"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.write(f"**User:** {member}")
+                    st.write(f"ID: `{user_id}`")
+                with col2:
+                    st.write(f"**Assigned to:** {mod}")
+                    st.write(f"**Status:** {status}")
+                with col3:
+                    st.write(f"**Created:** {created}")
+                    if closed:
+                        st.write(f"**Closed:** {closed}")
+                
+                # Try to load associated transcript file
+                tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
+                transcript_file = tdir / f"{channel_id}.txt"
+                if transcript_file.exists():
+                    raw = load_transcript_file(transcript_file)
+                    messages = parse_transcript(raw)
+                    img_root = find_dir(DEFAULT_IMAGE_DIRS)
+                    st.markdown(f"**Transcript ({len(messages)} messages):**")
+                    render_messages(messages, img_root, staff_identifiers, show_internal, internal_markers)
+                else:
+                    st.write(f"*[Transcript file not found: {transcript_file}]*")
+    
+    elif source == "Local files":
         tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
         img_root = find_dir(DEFAULT_IMAGE_DIRS)
-        st.sidebar.markdown(f"Transcripts dir: {tdir}")
+        st.sidebar.markdown(f"Transcripts dir: `{tdir}`")
         files = [p for p in tdir.glob("*.txt")] if tdir.exists() else []
         if not files:
-            st.warning(f"No transcript files found in {tdir}.")
+            st.warning(f"No transcript files found in `{tdir}`.")
             return
         choice = st.selectbox("Transcript file", options=sorted(files), format_func=lambda p: p.name)
         raw = load_transcript_file(choice)
@@ -193,23 +284,20 @@ def main():
         st.sidebar.markdown(f"Messages: {len(messages)}")
         render_messages(messages, img_root, staff_identifiers, show_internal, internal_markers)
 
-    else:
-        db_url = st.sidebar.text_input("Database URL (SQLAlchemy) e.g. postgresql://user:pass@host/db")
+    else:  # Custom URL
+        db_url = st.sidebar.text_input("Database URL (SQLAlchemy)", placeholder="postgresql://user:pass@host/db")
         if not db_url:
-            st.info("Provide DATABASE URL to enable DB mode.")
+            st.info("Provide a SQLAlchemy DATABASE URL (e.g., `postgresql://user:pass@host/db`).")
             return
-        rows = try_query_db(db_url)
+        rows = query_custom_url(db_url)
         if not rows:
             return
+        st.markdown("### Custom Database Results")
         for r in rows:
             d = dict(r)
             author = d.get("author") or d.get("username") or d.get("sender") or ""
             ts = d.get("created_at") or d.get("timestamp") or ""
             content = d.get("content") or d.get("message") or ""
-            images = []
-            attachments = []
-            if "attachment" in d:
-                attachments = [d.get("attachment")]
             st.markdown(f"**{author}** — _{ts}_")
             st.write(content)
             st.markdown("---")

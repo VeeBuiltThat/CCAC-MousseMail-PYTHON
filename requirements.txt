@@ -7,3 +7,4 @@ streamlit
 pillow
 sqlalchemy
 psycopg2-binary
+mysql-connector-python
