@@ -172,4 +172,26 @@ class DatabaseManager:
         )
         self.conn.commit()
 
+    def add_note(self, user_id: int, note: str, staff: str):
+        """Add a note for a user."""
+        self.cursor.execute(
+            """
+            INSERT INTO user_notes (user_id, note, staff, created_at)
+            VALUES (%s, %s, %s, NOW())
+            """,
+            (user_id, note, staff)
+        )
+        self.conn.commit()
 
+    def get_notes(self, user_id: int):
+        """Retrieve all notes for a user, ordered by creation time."""
+        self.cursor.execute(
+            """
+            SELECT id, user_id, note, staff, created_at
+            FROM user_notes
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            """,
+            (user_id,)
+        )
+        return self.cursor.fetchall()

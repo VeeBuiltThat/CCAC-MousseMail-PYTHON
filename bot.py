@@ -7,6 +7,7 @@ from discord.ext import commands
 from aiohttp import ClientSession
 import logging
 import threading
+import traceback
 
 
 from config_manager import ConfigManager
@@ -14,6 +15,8 @@ from thread_manager import ThreadManager
 from database_manager import DatabaseManager
 from dateutil.relativedelta import relativedelta
 from config import GUILD_ID, STAFF_ROLE_ID, CATEGORY_IDS, TICKET_MESSAGES, TEMP_DIR, LOG_DIR, TICKET_REMINDER_HOURS, DISCORD_TOKEN
+
+from note_manager import NoteManager
 
 
 logger = logging.getLogger("modmail")
@@ -68,6 +71,26 @@ class ModmailBot(commands.Bot):
         await self.load_extensions()
         self.loop.create_task(self.timer_task())
         self._connected.set()
+
+    @commands.Cog.listener()
+    async def on_error(self, event, *args, **kwargs):
+        """Log errors and notify dev."""
+        logger.error(f"Error in {event}: {traceback.format_exc()}")
+        # Optionally send to a designated error channel
+        error_channel_id = 1352669054346854502  # set this to your error notification channel ID
+        if error_channel_id:
+            try:
+                error_channel = self.get_channel(error_channel_id)
+                if error_channel:
+                    embed = discord.Embed(
+                        title="⚠️ Error Detected",
+                        description=f"Event: {event}\n\n```{traceback.format_exc()[:1000]}```",
+                        color=discord.Color.red(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    await error_channel.send(embed=embed)
+            except Exception:
+                pass
 
     async def timer_task(self):
         """Periodic task that checks ticket timers (24h suspend closures)."""
@@ -466,6 +489,12 @@ async def send_category_details(interaction: discord.Interaction, category_key: 
     user_info_embed = await bot.get_user_info_embed(user)
     await ticket_channel.send(embed=user_info_embed)
     # ------------------------------------------------
+
+    # send any existing staff notes for this user
+    notes = NoteManager.get_notes(user.id)
+    if notes:
+        note_text = "\n".join(f"[{n['timestamp']}] {n['staff']}: {n['note']}" for n in notes)
+        await ticket_channel.send(embed=discord.Embed(title="Staff Notes", description=note_text, color=discord.Color.dark_gold()))
 
     bot.db.create_ticket_entry(user, ticket_channel, category_id, category_key)
 

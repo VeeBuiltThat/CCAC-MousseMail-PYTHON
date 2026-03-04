@@ -243,7 +243,7 @@ class Modmail(commands.Cog):
     # ---------------- Commands ----------------
 
     @commands.command(name="cancelclose")
-    @commands.has_permissions(manage_channels=True)
+    @jrmod_or_manage_channels()
     async def cancel_close(self, ctx: commands.Context):
         """Cancel a scheduled close (DB and internal fallback)."""
         cancelled_db = await self._try_db_cancel_ticket_timer(ctx.channel.id, "close")
@@ -268,7 +268,7 @@ class Modmail(commands.Cog):
 
 
     @commands.command(name="close")
-    @commands.has_permissions(manage_channels=True)
+    @jrmod_or_manage_channels()
     async def close_ticket(self, ctx: commands.Context, time: str = None):
         """
         Schedule a close for this ticket. Accepts:
@@ -433,33 +433,9 @@ class Modmail(commands.Cog):
             if ch == channel.id:
                 del self.open_tickets[uid]
                 
-    @commands.command(name="log")
-    @jrmod_or_manage_channels()
-    async def log_ticket(self, ctx: commands.Context):
-        if not ctx.channel.category or ctx.channel.category.id not in self.ticket_category_ids:
-            await ctx.send(embed=discord.Embed(
-                description="This command can only be used in ticket channels.",
-                color=discord.Color.red(),
-                timestamp=datetime.now(timezone.utc)
-            ))
-            return
-
-        success = await self._log_ticket(ctx.channel, author=ctx.author)
-        if success:
-            await ctx.send(embed=discord.Embed(
-                description="Ticket has been logged with transcript.",
-                color=discord.Color.green(),
-                timestamp=datetime.now(timezone.utc)
-            ))
-        else:
-            await ctx.send(embed=discord.Embed(
-                description="Failed to log ticket.",
-                color=discord.Color.red(),
-                timestamp=datetime.now(timezone.utc)
-            ))
 
     @commands.command(name="suspend")
-    @commands.has_permissions(manage_channels=True)
+    @jrmod_or_manage_channels()
     async def suspend_ticket(self, ctx: commands.Context):
         """
         Suspend: schedule an auto-close in 24 hours if the user doesn't respond.

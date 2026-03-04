@@ -1,3 +1,4 @@
+
 from discord.ext import commands
 import discord
 from config import CATEGORY_IDS, AUTHORIZED_USER_ID
@@ -33,12 +34,17 @@ class CategoryManagement(commands.Cog):
         else:
             await ctx.send("Failed to move ticket. Category not found.")
 
-    @commands.command(name='newcc')
-    @commands.has_permissions(manage_channels=True)
+    @commands.command(name='create')
     async def create_category(self, ctx, *, category_name: str):
-        """Create a new category in the server. Only allowed for a specific user."""
-        if ctx.author.id != AUTHORIZED_USER_ID:
-            await ctx.send("You are not authorized to use this command.")
+        """Create a new category in the server.
+
+        Allowed for staff members who have one of the special create roles or
+        `manage_channels` permission.  This replaces the old `newcc` command.
+        """
+        # permission check
+        allowed_roles = getattr(__import__('cogs.config', fromlist=['CREATE_CATEGORY_ROLES']), 'CREATE_CATEGORY_ROLES')
+        if not (any(r.id in allowed_roles for r in ctx.author.roles) or ctx.author.guild_permissions.manage_channels):
+            await ctx.send("🚫 You are not authorized to use this command.")
             return
 
         guild = ctx.guild

@@ -4,12 +4,112 @@ import re
 import io
 import os
 import json
+import asyncio
 from datetime import datetime, timezone
 from config import (
     JUNIOR_MOD_ROLE_ID, ADDITIONAL_STAFF_ROLE_ID, STAFF_ROLES,
     ALLOWED_CATEGORIES, DISALLOWED_CATEGORY, TRANSCRIPT_DIR
 )
 from bot import ClaimTicketButton  # your custom button class
+from note_manager import NoteManager
+
+
+class NotesView(discord.ui.View):
+    """Paginated view for displaying user notes with arrow navigation."""
+    def __init__(self, notes: list, user_id: int, user_name: str):
+        super().__init__(timeout=180)
+        self.notes = notes
+        self.user_id = user_id
+        self.user_name = user_name
+        self.current_page = 0
+
+    def _build_embed(self) -> discord.Embed:
+        """Build the embed for the current page."""
+        if not self.notes:
+            return discord.Embed(
+                title=f"📝 Notes for {self.user_name}",
+                description="No notes on record.",
+                color=discord.Color.orange()
+            )
+        
+        note = self.notes[self.current_page]
+        embed = discord.Embed(
+            title=f"📝 Notes for {self.user_name}",
+            description=note["note"],
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="By", value=note["staff"], inline=True)
+        embed.add_field(name="Date", value=note["created_at"], inline=True)
+        embed.set_footer(text=f"Note {self.current_page + 1}/{len(self.notes)}")
+        return embed
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+        else:
+            self.current_page = len(self.notes) - 1
+        await interaction.response.edit_message(embed=self._build_embed())
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.notes) - 1:
+            self.current_page += 1
+        else:
+            self.current_page = 0
+        await interaction.response.edit_message(embed=self._build_embed())
+
+
+class TranscriptView(discord.ui.View):
+    """Paginated view for displaying transcript messages with arrow navigation."""
+    def __init__(self, messages: list, channel_name: str, saved_at: str):
+        super().__init__(timeout=180)
+        self.messages = messages
+        self.channel_name = channel_name
+        self.saved_at = saved_at
+        self.current_page = 0
+
+    def _build_embed(self) -> discord.Embed:
+        """Build the embed for the current message (or cluster of messages)."""
+        if not self.messages:
+            return discord.Embed(
+                title=f"📋 Transcript - {self.channel_name}",
+                description="No messages in transcript.",
+                color=discord.Color.orange()
+            )
+        
+        msg = self.messages[self.current_page]
+        content = msg["content"][:1024] if msg["content"] else "*No content*"
+        
+        embed = discord.Embed(
+            title=f"📋 Transcript - {self.channel_name}",
+            description=content,
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
+        )
+        embed.add_field(name="Role", value=msg["role"], inline=True)
+        embed.add_field(name="Author", value=msg["author"], inline=True)
+        embed.add_field(name="Time", value=msg["timestamp"], inline=True)
+        embed.set_footer(text=f"Message {self.current_page + 1}/{len(self.messages)} | Saved {self.saved_at}")
+        return embed
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.primary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+        else:
+            self.current_page = len(self.messages) - 1
+        await interaction.response.edit_message(embed=self._build_embed())
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.messages) - 1:
+            self.current_page += 1
+        else:
+            self.current_page = 0
+        await interaction.response.edit_message(embed=self._build_embed())
+
 
 def get_staff_position(member: discord.Member):
     """Return highest staff role of a member."""
@@ -29,6 +129,7 @@ def staff_or_manage_channels():
 class StaffCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.note_manager = NoteManager(bot)
 
     # ------------------ Helpers ------------------
 
@@ -248,7 +349,7 @@ class StaffCommands(commands.Cog):
             await ctx.send(embed=self.build_embed("Edit Failed", str(e), discord.Color.red()))
 
     @commands.command(name="delete")
-    @commands.has_permissions(manage_channels=True)
+    @staff_or_manage_channels()
     async def delete_message(self, ctx):
         try:
             if not ctx.message.reference or not isinstance(ctx.message.reference.resolved, discord.Message):
@@ -269,7 +370,7 @@ class StaffCommands(commands.Cog):
     # ------------------ Ticket Transfer / Contact ------------------
 
     @commands.command(name="transfer")
-    @commands.has_permissions(manage_channels=True)
+    @staff_or_manage_channels()
     async def transfer_ticket(self, ctx, new_mod: discord.Member):
         if ctx.channel.category_id is None:
             await ctx.send("❌ This command can only be used inside a ticket channel.")
@@ -278,7 +379,7 @@ class StaffCommands(commands.Cog):
         await ctx.send(f"✅ Ticket has been transferred to {new_mod.mention}.\nThey are now responsible for this ticket.")
 
     @commands.command(name="contact")
-    @commands.has_permissions(manage_guild=True)
+    @staff_or_manage_channels()
     async def contact_user(self, ctx, user_id: int, *, reason: str = "No reason provided"):
         try:
             user = await self.bot.fetch_user(user_id)
@@ -311,36 +412,198 @@ class StaffCommands(commands.Cog):
         except Exception as e:
             await ctx.send(embed=self.build_embed("Error", str(e), discord.Color.red(), ctx.author))
 
+    # ------------------ Utility helpers ------------------
+
+    def _parse_time_to_seconds(self, timestr: str) -> int:
+        """Convert simple expressions to seconds (hrs/days/hh:mm)."""
+        if not timestr:
+            raise ValueError("Empty time string")
+        s = timestr.strip().lower()
+        if s.endswith("d"):
+            return int(float(s[:-1]) * 86400)
+        if s.endswith("h"):
+            return int(float(s[:-1]) * 3600)
+        if ":" in s:
+            parts = s.split(":")
+            if len(parts) == 2:
+                h, m = map(int, parts)
+                return h * 3600 + m * 60
+            elif len(parts) == 3:
+                h, m, sec = map(int, parts)
+                return h * 3600 + m * 60 + sec
+        # plain number treated as minutes
+        return int(float(s) * 60)
+
+    # ------------------ Notes / tracking commands ------------------
+
+    @commands.command(name="note")
+    @staff_or_manage_channels()
+    async def note_user(self, ctx, *, message: str):
+        """Leave a note for the user; notes persist across tickets."""
+        user = await self.get_user_from_channel(ctx.channel)
+        if not user:
+            await ctx.send("Unable to determine user associated with this channel.")
+            return
+        self.note_manager.add_note(user.id, message, str(ctx.author))
+        await ctx.send(embed=self.build_embed("Note Added", f"Saved note for {user.mention}.", discord.Color.green()))
+
+    @commands.command(name="trs")
+    @staff_or_manage_channels()
+    async def trs(self, ctx, user_id: int):
+        """Show transcripts and notes for a user (both with pagination embeds)."""
+        try:
+            user = await self.bot.fetch_user(user_id)
+            user_name = str(user)
+        except Exception:
+            user_name = f"User {user_id}"
+        
+        notes = self.note_manager.get_notes(user_id)
+        transcripts = TranscriptManager.load_transcripts(user_id)
+        
+        # If no notes or transcripts, inform user
+        if not notes and not transcripts:
+            await ctx.send(embed=discord.Embed(
+                title=f"📋 User Record for {user_name}",
+                description="No notes or transcripts on record.",
+                color=discord.Color.orange()
+            ))
+            return
+        
+        # Start with showing notes if available
+        if notes:
+            notes_data = [{
+                "note": n["note"],
+                "staff": n["staff"],
+                "created_at": str(n["created_at"]) if n["created_at"] else "Unknown"
+            } for n in notes]
+            
+            view = NotesView(notes_data, user_id, user_name)
+            await ctx.send(embed=view._build_embed(), view=view)
+        
+        # Then show transcripts if available
+        if transcripts:
+            for entry in transcripts:
+                if entry["messages"]:
+                    view = TranscriptView(entry["messages"], entry["channel"], entry["saved_at"])
+                    await ctx.send(embed=view._build_embed(), view=view)
+
+    @commands.command(name="remindme")
+    @staff_or_manage_channels()
+    async def remind_me(self, ctx, about: str, when: str):
+        """Remind yourself about something after a delay."""
+        try:
+            seconds = self._parse_time_to_seconds(when)
+        except Exception:
+            await ctx.send("Invalid time format. Try `1h`, `2d`, `1:30`, etc.")
+            return
+        await ctx.send(f"⏲️ Reminder set for {when} from now.")
+        async def _reminder():
+            await asyncio.sleep(seconds)
+            try:
+                await ctx.author.send(f"⏰ Reminder: {about}")
+            except Exception:
+                pass
+        self.bot.loop.create_task(_reminder())
+
+    @commands.command(name="anon")
+    @staff_or_manage_channels()
+    async def anonymous_reply(self, ctx, *, message: str = ""):
+        """Reply to the user without disclosing your name."""
+        user = await self.get_user_from_channel(ctx.channel)
+        if not user:
+            await ctx.send("Unable to find the ticket user.")
+            return
+        try:
+            user_embed = self.build_embed("", message, discord.Color.orange(), self.bot.user)
+            user_msg = await user.send(embed=user_embed)
+            staff_embed = self.build_embed("", "STAFF RESPONSE (anonymous):\n" + message, discord.Color.green(), author=None)
+            await ctx.channel.send(embed=staff_embed)
+            await ctx.message.delete()
+        except Exception as e:
+            await ctx.send(embed=self.build_embed("Error", f"Failed to send anonymous reply: {e}", discord.Color.red()))
+
+    @commands.command(name="raw")
+    @staff_or_manage_channels()
+    async def raw(self, ctx):
+        """Show the raw user ID for the current ticket channel."""
+        user = await self.get_user_from_channel(ctx.channel)
+        if user:
+            await ctx.send(str(user.id))
+        else:
+            await ctx.send("Could not determine user ID.")
+
+    @commands.command(name="language")
+    @staff_or_manage_channels()
+    async def language(self, ctx, lng: str, *, text: str = None):
+        """Translate messages to/from a given language (placeholder)."""
+        await ctx.send("🌐 Language translation feature coming in a future update.")
+
+    @commands.command(name="stats")
+    @staff_or_manage_channels()
+    async def stats(self, ctx):
+        """Display basic ticket statistics (restricted role)."""
+        from cogs.config import STATS_ROLE_ID
+        if STATS_ROLE_ID not in [r.id for r in ctx.author.roles]:
+            await ctx.send("🚫 You are not authorized to run that command.")
+            return
+        # compute some simple metrics from transcript files
+        now = datetime.now(timezone.utc)
+        tickets_today = 0
+        response_times = []
+        resolution_times = []
+        staff_counts = {}
+        for fname in os.listdir(TRANSCRIPT_DIR):
+            if not fname.endswith('.json') or '_notes' in fname:
+                continue
+            path = os.path.join(TRANSCRIPT_DIR, fname)
+            try:
+                with open(path,'r',encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            for entry in data:
+                saved_at = datetime.strptime(entry['saved_at'], "%Y-%m-%d %H:%M:%S")
+                if saved_at.date() == now.date():
+                    tickets_today += 1
+                msgs = entry.get('messages', [])
+                first_user = None
+                first_staff = None
+                last_time = None
+                for m in msgs:
+                    t = datetime.strptime(m['timestamp'], "%Y-%m-%d %H:%M:%S")
+                    last_time = t if last_time is None or t>last_time else last_time
+                    if m['role'].startswith('USER') and first_user is None:
+                        first_user = t
+                    if m['role'].startswith('STAFF') and first_staff is None:
+                        first_staff = t
+                        staff_counts[m['author']] = staff_counts.get(m['author'],0)+1
+                if first_user and first_staff:
+                    response_times.append((first_staff-first_user).total_seconds())
+                if first_user and last_time:
+                    resolution_times.append((last_time-first_user).total_seconds())
+        avg_resp = sum(response_times)/len(response_times) if response_times else 0
+        avg_res = sum(resolution_times)/len(resolution_times) if resolution_times else 0
+        most_active = max(staff_counts.items(), key=lambda x: x[1])[0] if staff_counts else 'N/A'
+        embed = discord.Embed(title="Ticket Stats", color=discord.Color.blue())
+        embed.add_field(name="Tickets Today", value=str(tickets_today), inline=False)
+        embed.add_field(name="Avg. Response (s)", value=f"{avg_resp:.1f}", inline=False)
+        embed.add_field(name="Avg. Resolution (s)", value=f"{avg_res:.1f}", inline=False)
+        embed.add_field(name="Most Active Staff", value=most_active, inline=False)
+        await ctx.send(embed=embed)
+
     # ------------------ Transcript Command ------------------
     @commands.command(name="transcript")
     async def transcript_command(self, ctx, user_id: int = None):
-        target_channel_id = 1352669054346854502
-        target_channel = self.bot.get_channel(target_channel_id)
-
         if user_id:
             data = TranscriptManager.load_transcripts(user_id)
             if not data:
                 await ctx.send(f"No transcripts found for user ID `{user_id}`.")
                 return
 
-            for i, entry in enumerate(data):
-                content = "\n".join(
-                    f"[{m['timestamp']}] {m['role']} ({m['author']}): {m['content']}"
-                    for m in entry["messages"]
-                )
-                file = discord.File(io.BytesIO(content.encode()), filename=f"ticket_{i+1}.txt")
-                transcript_url = f"http://127.0.0.1:5000/index.html?ticket={user_id}"
-                view = discord.ui.View()
-                view.add_item(discord.ui.Button(label="View Transcript", url=transcript_url, style=discord.ButtonStyle.link))
-                embed = discord.Embed(
-                    title="Transcript Available",
-                    description=f"Transcript from `{entry['channel']}` saved on `{entry['saved_at']}`.\n[View Transcript]({transcript_url})",
-                    color=discord.Color.blue(),
-                )
-                if target_channel:
-                    await target_channel.send(embed=embed, file=file, view=view)
-                else:
-                    await ctx.send(embed=embed, file=file, view=view)
+            for entry in data:
+                if entry["messages"]:
+                    view = TranscriptView(entry["messages"], entry["channel"], entry["saved_at"])
+                    await ctx.send(embed=view._build_embed(), view=view)
         else:
             if not isinstance(ctx.channel, discord.TextChannel):
                 await ctx.send("This command must be run in a text channel.")
@@ -360,10 +623,12 @@ class StaffCommands(commands.Cog):
             messages = [msg async for msg in ctx.channel.history(limit=None, oldest_first=True)]
             TranscriptManager.save_transcript(user.id, ctx.channel, messages)
 
-            transcript_url = f"http://127.0.0.1:5000/index.html?ticket={user.id}"
-            view = discord.ui.View()
-            view.add_item(discord.ui.Button(label="View Transcript", url=transcript_url, style=discord.ButtonStyle.link))
-            await ctx.send(f"Transcript has been saved for user `{user.name}`.", view=view)
+            await ctx.send(embed=discord.Embed(
+                title="Transcript Saved",
+                description=f"Transcript has been saved for user `{user.name}`.",
+                color=discord.Color.green(),
+                timestamp=discord.utils.utcnow()
+            ))
 
 
 class TranscriptManager:
