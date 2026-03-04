@@ -1,7 +1,10 @@
 
 from discord.ext import commands
 import discord
-from config import CATEGORY_IDS, AUTHORIZED_USER_ID
+import config as app_config
+
+CATEGORY_IDS = getattr(app_config, "CATEGORY_IDS", {})
+AUTHORIZED_USER_ID = getattr(app_config, "AUTHORIZED_USER_ID", 0)
 
 class CategoryManagement(commands.Cog):
     def __init__(self, bot):

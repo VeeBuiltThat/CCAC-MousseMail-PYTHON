@@ -4,6 +4,7 @@ import streamlit as st
 from pathlib import Path
 from PIL import Image
 from typing import List, Dict, Any
+from urllib.parse import quote
 
 try:
     import mysql.connector
@@ -160,6 +161,100 @@ def query_mysql_tickets():
     return None
 
 
+def list_transcript_files(transcript_dir: Path) -> Dict[str, Path]:
+    if not transcript_dir.exists():
+        return {}
+    mapping = {}
+    for p in transcript_dir.glob("*.txt"):
+        channel_id = p.stem
+        mapping[channel_id] = p
+    return mapping
+
+
+def normalize_query_value(value: Any) -> str:
+    if isinstance(value, list):
+        return value[0] if value else ""
+    return value or ""
+
+
+def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path]):
+    st.subheader("Logs")
+    if not tickets:
+        st.info("No tickets found in database.")
+        return
+
+    open_tickets = [t for t in tickets if str(t.get("status", "")).lower() == "open"]
+    closed_tickets = [t for t in tickets if str(t.get("status", "")).lower() == "closed"]
+
+    tab_open, tab_closed = st.tabs([f"Open ({len(open_tickets)})", f"Closed ({len(closed_tickets)})"])
+
+    def render_ticket_list(items: List[Dict[str, Any]]):
+        if not items:
+            st.write("No tickets in this category.")
+            return
+        public_base_url = os.getenv("STREAMLIT_PUBLIC_URL", "").rstrip("/")
+        for ticket in items:
+            channel_id = str(ticket.get("channel_id"))
+            member = ticket.get("member_username", "Unknown")
+            mod = ticket.get("mod_username") or "Unassigned"
+            created = ticket.get("created_at", "")
+            relative_link = f"?section=transcript&channel={quote(channel_id)}"
+            copy_link = f"{public_base_url}/{relative_link}" if public_base_url else relative_link
+            has_transcript = channel_id in transcript_map
+            icon = "🟢" if str(ticket.get("status", "")).lower() == "open" else "🔴"
+            st.markdown(f"{icon} **#{channel_id}** · {member} · mod: {mod} · created: {created}")
+            col_open, col_copy = st.columns([0.25, 0.75])
+            with col_open:
+                st.link_button("Open Transcript", relative_link)
+            with col_copy:
+                st.text_input(
+                    "Copy link",
+                    value=copy_link,
+                    key=f"copy_link_{channel_id}_{ticket.get('status', 'unknown')}",
+                    label_visibility="collapsed",
+                )
+            if not has_transcript:
+                st.caption("Transcript file not found yet for this ticket.")
+
+    with tab_open:
+        render_ticket_list(open_tickets)
+    with tab_closed:
+        render_ticket_list(closed_tickets)
+
+
+def render_transcript_view(
+    transcript_map: Dict[str, Path],
+    image_root: Path,
+    staff_identifiers: List[str],
+    show_internal: bool,
+    internal_markers: List[str],
+    preselected_channel: str,
+):
+    st.subheader("Transcript View")
+    if not transcript_map:
+        st.warning("No transcript files found.")
+        return
+
+    channel_ids = sorted(transcript_map.keys(), reverse=True)
+    default_index = 0
+    if preselected_channel and preselected_channel in transcript_map:
+        default_index = channel_ids.index(preselected_channel)
+
+    selected_channel = st.selectbox("Select ticket channel", channel_ids, index=default_index)
+    selected_path = transcript_map[selected_channel]
+
+    st.caption(f"Transcript file: {selected_path}")
+    raw = load_transcript_file(selected_path)
+    messages = parse_transcript(raw)
+
+    if not messages:
+        st.info("Transcript is empty or could not be parsed.")
+        return
+
+    st.write(f"Messages: **{len(messages)}**")
+    render_messages(messages, image_root, staff_identifiers, show_internal, internal_markers)
+
+
 def query_custom_url(url: str):
     """Query arbitrary database via SQLAlchemy."""
     if not SQLALCHEMY_AVAILABLE:
@@ -211,13 +306,23 @@ def main():
 
     st.sidebar.success("✅ Authenticated")
 
-    source = st.sidebar.radio(
-        "Data source",
-        ("MySQL Database", "Local files", "Custom URL"),
-        help="MySQL is primary, Local files as fallback, Custom URL for other databases"
+    query_section = normalize_query_value(st.query_params.get("section", ""))
+    query_channel = normalize_query_value(st.query_params.get("channel", ""))
+
+    section_labels = {
+        "overview": "Overview",
+        "logs": "Logs",
+        "transcript": "Transcript View",
+    }
+    default_section_key = query_section if query_section in section_labels else "logs"
+    section_key = st.sidebar.radio(
+        "Category",
+        ("overview", "logs", "transcript"),
+        index=("overview", "logs", "transcript").index(default_section_key),
+        format_func=lambda key: section_labels[key],
     )
 
-    staff_ids_input = st.sidebar.text_input("Staff identifier substrings (comma-separated)", value="mod,staff,admin")
+    staff_ids_input = st.sidebar.text_input("Staff identifier substrings (comma-separated)", value="mod,staff,admin,mousse")
     staff_identifiers = [s.strip() for s in staff_ids_input.split(",") if s.strip()]
 
     internal_markers_input = st.sidebar.text_input("Internal note markers (comma-separated)", value="internal,note,staff-only")
@@ -225,82 +330,37 @@ def main():
 
     show_internal = st.sidebar.checkbox("Show internal notes", value=False)
 
-    if source == "MySQL Database":
-        st.sidebar.markdown(f"**Database:** `{DB_CONFIG['host']}/{DB_CONFIG['database']}`")
-        tickets = query_mysql_tickets()
-        if not tickets:
-            st.info("No tickets found in database.")
-            return
-        
-        st.markdown(f"### Tickets from Database ({len(tickets)} total)")
-        
-        for ticket in tickets:
-            channel_id = ticket.get("channel_id")
-            user_id = ticket.get("user_id")
-            member = ticket.get("member_username", "Unknown")
-            mod = ticket.get("mod_username", "Unassigned")
-            status = ticket.get("status", "unknown").upper()
-            created = ticket.get("created_at", "")
-            closed = ticket.get("closed_at", "")
-            
-            status_color = "🟢" if status == "OPEN" else "🔴"
-            
-            with st.expander(f"{status_color} #{channel_id} · {member} · {status}"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.write(f"**User:** {member}")
-                    st.write(f"ID: `{user_id}`")
-                with col2:
-                    st.write(f"**Assigned to:** {mod}")
-                    st.write(f"**Status:** {status}")
-                with col3:
-                    st.write(f"**Created:** {created}")
-                    if closed:
-                        st.write(f"**Closed:** {closed}")
-                
-                # Try to load associated transcript file
-                tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
-                transcript_file = tdir / f"{channel_id}.txt"
-                if transcript_file.exists():
-                    raw = load_transcript_file(transcript_file)
-                    messages = parse_transcript(raw)
-                    img_root = find_dir(DEFAULT_IMAGE_DIRS)
-                    st.markdown(f"**Transcript ({len(messages)} messages):**")
-                    render_messages(messages, img_root, staff_identifiers, show_internal, internal_markers)
-                else:
-                    st.write(f"*[Transcript file not found: {transcript_file}]*")
-    
-    elif source == "Local files":
-        tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
-        img_root = find_dir(DEFAULT_IMAGE_DIRS)
-        st.sidebar.markdown(f"Transcripts dir: `{tdir}`")
-        files = [p for p in tdir.glob("*.txt")] if tdir.exists() else []
-        if not files:
-            st.warning(f"No transcript files found in `{tdir}`.")
-            return
-        choice = st.selectbox("Transcript file", options=sorted(files), format_func=lambda p: p.name)
-        raw = load_transcript_file(choice)
-        messages = parse_transcript(raw)
-        st.sidebar.markdown(f"Messages: {len(messages)}")
-        render_messages(messages, img_root, staff_identifiers, show_internal, internal_markers)
+    tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
+    img_root = find_dir(DEFAULT_IMAGE_DIRS)
+    transcript_map = list_transcript_files(tdir)
+    tickets = query_mysql_tickets() or []
 
-    else:  # Custom URL
-        db_url = st.sidebar.text_input("Database URL (SQLAlchemy)", placeholder="postgresql://user:pass@host/db")
-        if not db_url:
-            st.info("Provide a SQLAlchemy DATABASE URL (e.g., `postgresql://user:pass@host/db`).")
-            return
-        rows = query_custom_url(db_url)
-        if not rows:
-            return
-        st.markdown("### Custom Database Results")
-        for r in rows:
-            d = dict(r)
-            author = d.get("author") or d.get("username") or d.get("sender") or ""
-            ts = d.get("created_at") or d.get("timestamp") or ""
-            content = d.get("content") or d.get("message") or ""
-            st.markdown(f"**{author}** — _{ts}_")
-            st.write(content)
-            st.markdown("---")
+    st.sidebar.caption(f"Transcripts dir: {tdir}")
+    st.sidebar.caption(f"Detected transcripts: {len(transcript_map)}")
+
+    if section_key == "overview":
+        st.subheader("Overview")
+        open_count = sum(1 for t in tickets if str(t.get("status", "")).lower() == "open")
+        closed_count = sum(1 for t in tickets if str(t.get("status", "")).lower() == "closed")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Open tickets", open_count)
+        c2.metric("Closed tickets", closed_count)
+        c3.metric("Transcript files", len(transcript_map))
+        st.write("Use **Logs** to browse ticket status and open transcript links.")
+        st.write("Use **Transcript View** to read full conversation history.")
+
+    elif section_key == "logs":
+        render_logs_view(tickets, transcript_map)
+
+    elif section_key == "transcript":
+        render_transcript_view(
+            transcript_map,
+            img_root,
+            staff_identifiers,
+            show_internal,
+            internal_markers,
+            query_channel,
+        )
 
 
 if __name__ == "__main__":

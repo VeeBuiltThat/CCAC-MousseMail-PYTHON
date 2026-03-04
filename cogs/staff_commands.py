@@ -6,10 +6,14 @@ import os
 import json
 import asyncio
 from datetime import datetime, timezone
-from config import (
-    JUNIOR_MOD_ROLE_ID, ADDITIONAL_STAFF_ROLE_ID, STAFF_ROLES,
-    ALLOWED_CATEGORIES, DISALLOWED_CATEGORY, TRANSCRIPT_DIR
-)
+import config as app_config
+
+JUNIOR_MOD_ROLE_ID = getattr(app_config, "JUNIOR_MOD_ROLE_ID", 0)
+ADDITIONAL_STAFF_ROLE_ID = getattr(app_config, "ADDITIONAL_STAFF_ROLE_ID", 0)
+STAFF_ROLES = getattr(app_config, "STAFF_ROLES", {})
+ALLOWED_CATEGORIES = getattr(app_config, "ALLOWED_CATEGORIES", set())
+DISALLOWED_CATEGORY = getattr(app_config, "DISALLOWED_CATEGORY", 0)
+TRANSCRIPT_DIR = getattr(app_config, "TRANSCRIPT_DIR", "transcripts")
 from bot import ClaimTicketButton  # your custom button class
 from note_manager import NoteManager
 
@@ -400,7 +404,19 @@ class StaffCommands(commands.Cog):
                 overwrites=overwrites,
                 topic=f"Contact ticket with {user} ({user.id})"
             )
-            self.bot.db.create_ticket_entry(user=user, channel=ticket_channel, category_id=category.id, ticket_type="contact")
+            created = self.bot.db.create_ticket_entry(user=user, channel=ticket_channel, category_id=category.id, ticket_type="contact")
+            if not created:
+                try:
+                    await ticket_channel.delete()
+                except Exception:
+                    pass
+                await ctx.send(embed=self.build_embed(
+                    "Contact Blocked",
+                    f"{user.mention} already has an open ticket.",
+                    discord.Color.orange(),
+                    ctx.author
+                ))
+                return
             staff_embed = self.build_embed("Contact Ticket Opened", f"A new contact ticket has been opened with {user.mention}.\nReason: {reason}", discord.Color.green(), ctx.author)
             await ticket_channel.send(embed=staff_embed, view=ClaimTicketButton(ticket_channel.id))
             try:

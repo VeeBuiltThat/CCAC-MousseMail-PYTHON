@@ -14,7 +14,17 @@ from config_manager import ConfigManager
 from thread_manager import ThreadManager
 from database_manager import DatabaseManager
 from dateutil.relativedelta import relativedelta
-from config import GUILD_ID, STAFF_ROLE_ID, CATEGORY_IDS, TICKET_MESSAGES, TEMP_DIR, LOG_DIR, TICKET_REMINDER_HOURS, DISCORD_TOKEN
+import config as app_config
+
+GUILD_ID = getattr(app_config, "GUILD_ID", 0)
+STAFF_ROLE_ID = getattr(app_config, "STAFF_ROLE_ID", 0)
+CATEGORY_IDS = getattr(app_config, "CATEGORY_IDS", {})
+TICKET_MESSAGES = getattr(app_config, "TICKET_MESSAGES", [])
+TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")
+LOG_DIR = getattr(app_config, "LOG_DIR", "logs")
+TICKET_REMINDER_HOURS = getattr(app_config, "TICKET_REMINDER_HOURS", 48)
+BOT_TOKEN = getattr(app_config, "BOT_TOKEN", None)
+BOT_BUILD_MARKER = "2026-03-04T14:58Z-note-fix-v3"
 
 from note_manager import NoteManager
 
@@ -60,6 +70,7 @@ class ModmailBot(commands.Bot):
         self.guild_id = GUILD_ID
         self.threads = ThreadManager(self)
         self.db = DatabaseManager(self)
+        self.note_manager = NoteManager(self)
 
         log_dir = os.path.join(temp_dir, "logs")
         os.makedirs(log_dir, exist_ok=True)
@@ -68,6 +79,7 @@ class ModmailBot(commands.Bot):
 
     async def on_ready(self):
         logger.info(f"Bot ready as {self.user} (ID: {self.user.id})")
+        logger.info(f"Build marker: {BOT_BUILD_MARKER} | file={__file__}")
         await self.load_extensions()
         self.loop.create_task(self.timer_task())
         self._connected.set()
@@ -197,6 +209,23 @@ class ModmailBot(commands.Bot):
 
         return embed
 
+    def find_open_ticket_channel_for_user(self, user_id: int, guild: discord.Guild = None):
+        if guild is None:
+            guild = self.get_guild(self.guild_id)
+        if guild is None:
+            return None
+
+        allowed_category_ids = set(CATEGORY_IDS.values())
+        user_id_marker = f"({user_id})"
+
+        for channel in guild.text_channels:
+            if channel.category_id not in allowed_category_ids:
+                continue
+            if channel.topic and user_id_marker in channel.topic:
+                return channel
+
+        return None
+
     async def on_message(self, message):
         if message.author.bot:
             return
@@ -209,10 +238,18 @@ class ModmailBot(commands.Bot):
     async def handle_user_dm(self, message: discord.Message):
         user = message.author
         channel_id = self.db.get_open_ticket_channel_id(user.id)
+        channel = None
 
         if channel_id:
             channel = self.get_channel(channel_id)
 
+        if channel is None:
+            fallback_channel = self.find_open_ticket_channel_for_user(user.id)
+            if fallback_channel is not None:
+                channel = fallback_channel
+                channel_id = fallback_channel.id
+
+        if channel_id:
             if channel is None:
                 await self.db.close_ticket(channel_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                 self.confirmed_users.discard(user.id)
@@ -295,7 +332,7 @@ class ModmailBot(commands.Bot):
             async with self:
                 self.session = ClientSession()
                 self.db.setup()
-                await self.start(DISCORD_TOKEN)
+                await self.start(BOT_TOKEN)
 
         asyncio.run(runner())
 
@@ -321,33 +358,69 @@ class TicketCategorySelect(discord.ui.Select):
         super().__init__(placeholder="📌 Select a ticket category...", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction):
-        bot: ModmailBot = interaction.client
-        user = interaction.user
+        try:
+            bot: ModmailBot = interaction.client
+            user = interaction.user
+            guild = interaction.guild or bot.get_guild(GUILD_ID)
 
-        # ✅ Check if user already has an open ticket
-        existing_channel_id = bot.db.get_open_ticket_channel_id(user.id)
-        if existing_channel_id:
-            await interaction.response.send_message(
-                "⚠️ You already have an open ticket. You cannot open another one.",
-                ephemeral=True
-            )
-            # Disable the dropdown for this user
+            # ✅ Check if user already has an open ticket
+            existing_channel_id = bot.db.get_open_ticket_channel_id(user.id)
+            existing_channel = bot.get_channel(existing_channel_id) if existing_channel_id else None
+            fallback_channel = bot.find_open_ticket_channel_for_user(user.id, guild=guild)
+
+            if existing_channel or fallback_channel:
+                await interaction.response.send_message(
+                    "⚠️ You already have an open ticket. You cannot open another one.",
+                    ephemeral=True
+                )
+                # Disable the dropdown for this user
+                self.disabled = True
+                await interaction.message.edit(view=self.view)
+                return
+
+            # Disable the dropdown after selection
             self.disabled = True
             await interaction.message.edit(view=self.view)
-            return
 
-        # Disable the dropdown after selection
-        self.disabled = True
-        await interaction.message.edit(view=self.view)
-
-        # Proceed to send category details and open the ticket
-        await send_category_details(interaction, self.values[0])
+            # Proceed to send category details and open the ticket
+            await send_category_details(interaction, self.values[0])
+        except Exception:
+            logger.exception("TicketCategorySelect callback failed")
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        "⚠️ Something went wrong while opening your ticket. Please try again.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "⚠️ Something went wrong while opening your ticket. Please try again.",
+                        ephemeral=True
+                    )
+            except Exception:
+                pass
 
 
 class TicketCategoryView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketCategorySelect())
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item):
+        logger.exception("TicketCategoryView on_error triggered: %s", error)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "⚠️ Something went wrong while opening your ticket. Please try again.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "⚠️ Something went wrong while opening your ticket. Please try again.",
+                    ephemeral=True
+                )
+        except Exception:
+            pass
 
 
 class ClaimTicketButton(discord.ui.View):
@@ -400,6 +473,22 @@ async def send_category_details(interaction: discord.Interaction, category_key: 
             ),
             ephemeral=True
         )
+        return
+
+    existing_channel_id = bot.db.get_open_ticket_channel_id(user.id)
+    existing_channel = bot.get_channel(existing_channel_id) if existing_channel_id else None
+    fallback_channel = bot.find_open_ticket_channel_for_user(user.id, guild=guild)
+    if existing_channel or fallback_channel:
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                "⚠️ You already have an open ticket. You cannot open another one.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "⚠️ You already have an open ticket. You cannot open another one.",
+                ephemeral=True
+            )
         return
 
     category_id = CATEGORY_IDS.get(category_key)
@@ -485,18 +574,41 @@ async def send_category_details(interaction: discord.Interaction, category_key: 
         topic=f"Ticket for {user.name} ({user.id})"
     )
 
+    created = bot.db.create_ticket_entry(user, ticket_channel, category_id, category_key)
+    if not created:
+        await interaction.followup.send(
+            "⚠️ You already have an open ticket. You cannot open another one.",
+            ephemeral=True
+        )
+        try:
+            await ticket_channel.delete()
+        except Exception as e:
+            logger.warning(f"Failed to delete duplicate ticket channel {ticket_channel.id}: {e}")
+        return
+
     # --- CREATE USER INFO EMBED AND SEND IT ---
     user_info_embed = await bot.get_user_info_embed(user)
     await ticket_channel.send(embed=user_info_embed)
     # ------------------------------------------------
 
     # send any existing staff notes for this user
-    notes = NoteManager.get_notes(user.id)
+    try:
+        notes = bot.note_manager.get_notes(user.id)
+    except Exception as e:
+        logger.error(f"Failed to fetch notes for user {user.id}: {e}")
+        notes = []
     if notes:
-        note_text = "\n".join(f"[{n['timestamp']}] {n['staff']}: {n['note']}" for n in notes)
-        await ticket_channel.send(embed=discord.Embed(title="Staff Notes", description=note_text, color=discord.Color.dark_gold()))
-
-    bot.db.create_ticket_entry(user, ticket_channel, category_id, category_key)
+        note_text = "\n".join(
+            f"[{n.get('created_at', n.get('timestamp', 'Unknown'))}] {n.get('staff', 'Unknown')}: {n.get('note', '')}"
+            for n in notes
+        )
+        await ticket_channel.send(
+            embed=discord.Embed(
+                title="Staff Notes",
+                description=note_text,
+                color=discord.Color.dark_gold()
+            )
+        )
 
     # 🕒 Schedule first reminder 48h later
     execute_at = datetime.now(timezone.utc) + timedelta(hours=TICKET_REMINDER_HOURS)
@@ -533,8 +645,16 @@ async def send_category_details(interaction: discord.Interaction, category_key: 
 
 
 def run_web_server():
-    from web_server import app
-    app.run(port=5000)
+    import sys
+    if '.' not in sys.path:
+        sys.path.insert(0, '.')
+    try:
+        from web_server import app
+    except ModuleNotFoundError:
+        logger.warning("web_server.py not found; skipping web server thread.")
+        return
+    app.run(port=5000, host='0.0.0.0')
+
 
 if __name__ == "__main__":
     # Start Flask server in a separate thread
@@ -543,4 +663,3 @@ if __name__ == "__main__":
 
     bot = ModmailBot()
     bot.run()
-    

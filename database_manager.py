@@ -1,7 +1,19 @@
 import mysql.connector
+from mysql.connector import errorcode
 import logging
 from datetime import datetime
-from config import DB_CONFIG  
+import os
+
+try:
+    from config import DB_CONFIG
+except Exception:
+    DB_CONFIG = {
+        "host": os.getenv("DB_HOST", "gameswaw5.bisecthosting.com"),
+        "port": int(os.getenv("DB_PORT", "3306")),
+        "user": os.getenv("DB_USER", "u1079393_bwVUJntzFf"),
+        "password": os.getenv("DB_PASS", ""),
+        "database": os.getenv("DB_NAME", "s1079393_ModMail"),
+    }
 
 logger = logging.getLogger("modmail.db")
 
@@ -18,7 +30,43 @@ class DatabaseManager:
         self.cursor = self.conn.cursor(dictionary=True)
 
     def setup(self):
+        self._ensure_single_open_ticket_constraint()
         logger.info("Database connection established.")
+
+    def _ensure_single_open_ticket_constraint(self):
+        try:
+            self.cursor.execute(
+                """
+                ALTER TABLE active_tickets
+                ADD COLUMN open_ticket_user_id BIGINT
+                GENERATED ALWAYS AS (
+                    CASE WHEN status = 'open' THEN user_id ELSE NULL END
+                ) STORED
+                """
+            )
+            self.conn.commit()
+            logger.info("Added generated column open_ticket_user_id to active_tickets.")
+        except mysql.connector.Error as err:
+            if err.errno != errorcode.ER_DUP_FIELDNAME:
+                logger.warning(f"Could not add generated column open_ticket_user_id: {err}")
+
+        try:
+            self.cursor.execute(
+                """
+                CREATE UNIQUE INDEX uq_active_tickets_one_open_per_user
+                ON active_tickets (open_ticket_user_id)
+                """
+            )
+            self.conn.commit()
+            logger.info("Created unique index uq_active_tickets_one_open_per_user.")
+        except mysql.connector.Error as err:
+            if err.errno == errorcode.ER_DUP_ENTRY:
+                logger.warning(
+                    "Cannot create unique open-ticket index because duplicate open tickets already exist. "
+                    "Please close duplicate rows first, then restart to apply the constraint."
+                )
+            elif err.errno != errorcode.ER_DUP_KEYNAME:
+                logger.warning(f"Could not create unique index uq_active_tickets_one_open_per_user: {err}")
 
     def get_open_ticket_channel_id(self, user_id: int, category_id: int = None):
         if category_id:
@@ -35,25 +83,35 @@ class DatabaseManager:
         return int(result["channel_id"]) if result else None
 
     def create_ticket_entry(self, user, channel, category_id, ticket_type: str):
-        self.cursor.execute(
-            """
-            INSERT INTO active_tickets 
-            (channel_id, user_id, member_username, mod_username, category_id, channel_name, created_at, closed_at, status, ticket_type, mod_id)
-            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NULL, %s, %s, %s)
-            """,
-            (
-                channel.id,
-                user.id,
-                str(user),
-                None,
-                category_id,
-                channel.name,
-                "open",
-                ticket_type,
-                None  # mod_id initially unassigned (NULL)
+        existing_open_channel_id = self.get_open_ticket_channel_id(user.id)
+        if existing_open_channel_id:
+            return False
+
+        try:
+            self.cursor.execute(
+                """
+                INSERT INTO active_tickets 
+                (channel_id, user_id, member_username, mod_username, category_id, channel_name, created_at, closed_at, status, ticket_type, mod_id)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW(), NULL, %s, %s, %s)
+                """,
+                (
+                    channel.id,
+                    user.id,
+                    str(user),
+                    None,
+                    category_id,
+                    channel.name,
+                    "open",
+                    ticket_type,
+                    None
+                )
             )
-        )
-        self.conn.commit()
+            self.conn.commit()
+            return True
+        except mysql.connector.Error as err:
+            if err.errno == errorcode.ER_DUP_ENTRY:
+                return False
+            raise
 
     def close_ticket_by_user(self, user_id: int):
         self.cursor.execute(

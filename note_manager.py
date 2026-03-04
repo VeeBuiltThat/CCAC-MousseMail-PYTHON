@@ -4,14 +4,28 @@ Note manager - wraps database operations for user notes.
 
 
 class NoteManager:
+    _default_bot = None
+
     def __init__(self, bot):
         self.bot = bot
+        NoteManager._default_bot = bot
 
-    def add_note(self, user_id: int, note: str, staff: str):
+    @classmethod
+    def _resolve_bot(cls, bot=None):
+        resolved_bot = bot or cls._default_bot
+        if resolved_bot is None:
+            raise RuntimeError("NoteManager has no bot context. Initialize NoteManager(bot) first.")
+        return resolved_bot
+
+    @classmethod
+    def add_note(cls, user_id: int, note: str, staff: str, bot=None):
         """Add a note for a user to the database."""
-        self.bot.db.add_note(user_id, note, staff)
+        resolved_bot = cls._resolve_bot(bot)
+        resolved_bot.db.add_note(user_id, note, staff)
 
-    def get_notes(self, user_id: int):
+    @classmethod
+    def get_notes(cls, user_id: int, bot=None):
         """Retrieve all notes for a user from the database."""
-        return self.bot.db.get_notes(user_id)
+        resolved_bot = cls._resolve_bot(bot)
+        return resolved_bot.db.get_notes(user_id)
 

@@ -7,11 +7,17 @@ import logging
 from datetime import datetime, timedelta, timezone
 import os
 import aiohttp
-from config import (
-    JUNIOR_MOD_ROLE_ID, ADDITIONAL_STAFF_ROLE_ID, NSFW_CATEGORY_ID, 
-    TICKET_CATEGORY_IDS, GUILD_ID, CATEGORY_ID, LOG_CHANNEL_ID,
-    TRANSCRIPT_DIR, IMAGE_DIR
-)
+import config as app_config
+
+JUNIOR_MOD_ROLE_ID = getattr(app_config, "JUNIOR_MOD_ROLE_ID", 0)
+ADDITIONAL_STAFF_ROLE_ID = getattr(app_config, "ADDITIONAL_STAFF_ROLE_ID", 0)
+NSFW_CATEGORY_ID = getattr(app_config, "NSFW_CATEGORY_ID", 0)
+TICKET_CATEGORY_IDS = getattr(app_config, "TICKET_CATEGORY_IDS", set())
+GUILD_ID = getattr(app_config, "GUILD_ID", 0)
+CATEGORY_ID = getattr(app_config, "CATEGORY_ID", 0)
+LOG_CHANNEL_ID = getattr(app_config, "LOG_CHANNEL_ID", 0)
+TRANSCRIPT_DIR = getattr(app_config, "TRANSCRIPT_DIR", "transcripts")
+IMAGE_DIR = getattr(app_config, "IMAGE_DIR", "transcripts/images")
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,7 @@ class Modmail(commands.Cog):
             1419606665891811469, # emergancy
             1419606732971180104, # events
             1419606799438319660 # jrmod
+            
         }
 
     
