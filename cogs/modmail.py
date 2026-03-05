@@ -196,6 +196,46 @@ class Modmail(commands.Cog):
 
     # ---------------- Transcript ----------------
 
+    def _extract_embed_payload(self, embed: discord.Embed):
+        payload = {
+            "title": embed.title or "",
+            "description": embed.description or "",
+            "author": embed.author.name if embed.author and embed.author.name else "",
+            "fields": [],
+        }
+
+        if embed.fields:
+            for field in embed.fields:
+                payload["fields"].append({
+                    "name": field.name or "",
+                    "value": field.value or "",
+                })
+
+        return payload
+
+    def _embed_payload_to_text(self, payload: dict):
+        parts = []
+        title = payload.get("title", "")
+        description = payload.get("description", "")
+        author = payload.get("author", "")
+        fields = payload.get("fields", [])
+
+        if title:
+            parts.append(title)
+        if author:
+            parts.append(author)
+        if description:
+            parts.append(description)
+        for field in fields:
+            name = field.get("name", "")
+            value = field.get("value", "")
+            if name and value:
+                parts.append(f"{name}: {value}")
+            elif value:
+                parts.append(value)
+
+        return "\n".join([p for p in parts if p]).strip()
+
     async def generate_transcript(self, channel: discord.TextChannel):
         transcript_messages = []
         os.makedirs(IMAGE_DIR, exist_ok=True)
@@ -220,9 +260,32 @@ class Modmail(commands.Cog):
                 "author_id": msg.author.id,
                 "role": role,
                 "content": msg.content or "",
+                "embeds": [],
                 "images": [],
                 "attachments": [],
             }
+
+            embed_text_parts = []
+            if msg.embeds:
+                for embed in msg.embeds:
+                    payload = self._extract_embed_payload(embed)
+                    entry["embeds"].append(payload)
+                    embed_text = self._embed_payload_to_text(payload)
+                    if embed_text:
+                        embed_text_parts.append(embed_text)
+
+            if embed_text_parts:
+                combined_embed_text = "\n\n".join(embed_text_parts)
+                if entry["content"].strip():
+                    entry["content"] = f"{entry['content']}\n\n{combined_embed_text}"
+                else:
+                    entry["content"] = combined_embed_text
+
+                role_hint_text = combined_embed_text.lower()
+                if "staff response" in role_hint_text:
+                    entry["role"] = "staff"
+                elif "user message" in role_hint_text:
+                    entry["role"] = "user"
 
             for attachment in msg.attachments:
                 # Save all images, regardless of sender

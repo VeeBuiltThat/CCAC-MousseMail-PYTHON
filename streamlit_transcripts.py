@@ -133,6 +133,35 @@ def render_messages(messages: List[Dict[str, Any]], image_root: Path, staff_iden
                 st.caption(ts)
             st.write(msg.get("content", ""))
 
+            embeds = msg.get("embeds", [])
+            if isinstance(embeds, list):
+                for embed in embeds:
+                    if not isinstance(embed, dict):
+                        continue
+                    embed_title = embed.get("title", "")
+                    embed_author = embed.get("author", "")
+                    embed_description = embed.get("description", "")
+                    embed_fields = embed.get("fields", [])
+
+                    if embed_title:
+                        st.markdown(f"**Embed:** {embed_title}")
+                    if embed_author:
+                        st.caption(f"Embed author: {embed_author}")
+                    if embed_description:
+                        st.write(embed_description)
+
+                    if isinstance(embed_fields, list) and embed_fields:
+                        for field in embed_fields:
+                            if not isinstance(field, dict):
+                                continue
+                            field_name = field.get("name", "")
+                            field_value = field.get("value", "")
+                            if field_name and field_value:
+                                st.markdown(f"**{field_name}**")
+                                st.write(field_value)
+                            elif field_value:
+                                st.write(field_value)
+
             for img_path in msg.get("images", []):
                 p = Path(img_path)
                 if not p.exists():
