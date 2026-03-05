@@ -3,6 +3,7 @@ from mysql.connector import errorcode
 import logging
 from datetime import datetime
 import os
+import json
 
 try:
     from config import DB_CONFIG
@@ -31,7 +32,111 @@ class DatabaseManager:
 
     def setup(self):
         self._ensure_single_open_ticket_constraint()
+        self._ensure_transcript_table()
         logger.info("Database connection established.")
+
+    def _ensure_transcript_table(self):
+        self.cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ticket_transcripts (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                channel_id BIGINT NOT NULL UNIQUE,
+                guild_id BIGINT,
+                guild_name VARCHAR(255),
+                channel_name VARCHAR(255),
+                category_name VARCHAR(255),
+                owner_id BIGINT NULL,
+                owner_name VARCHAR(255) NULL,
+                opened_by VARCHAR(255) NULL,
+                closed_by VARCHAR(255) NULL,
+                opened_at DATETIME NULL,
+                closed_at DATETIME NULL,
+                open_reason LONGTEXT NULL,
+                close_reason LONGTEXT NULL,
+                message_count INT DEFAULT 0,
+                transcript_json LONGTEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+            """
+        )
+        self.conn.commit()
+
+    def _parse_iso_datetime(self, value):
+        if not value or not isinstance(value, str):
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    def save_ticket_transcript(self, transcript_data: dict, closed_by: str = "System", close_reason: str = "Resolved"):
+        ticket = transcript_data.get("ticket", {}) if isinstance(transcript_data, dict) else {}
+        messages = transcript_data.get("messages", []) if isinstance(transcript_data, dict) else []
+
+        channel_id = ticket.get("channel_id")
+        if not channel_id:
+            return False
+
+        opened_at = None
+        if messages:
+            opened_at = self._parse_iso_datetime(messages[0].get("timestamp"))
+        closed_at = self._parse_iso_datetime(ticket.get("closed_at"))
+
+        open_reason = None
+        opened_by = ticket.get("owner_name")
+        for message in messages:
+            if message.get("role") == "user" and (message.get("content") or "").strip():
+                open_reason = (message.get("content") or "").strip()
+                break
+
+        transcript_json = json.dumps(transcript_data, ensure_ascii=False)
+
+        self.cursor.execute(
+            """
+            INSERT INTO ticket_transcripts (
+                channel_id, guild_id, guild_name, channel_name, category_name,
+                owner_id, owner_name, opened_by, closed_by,
+                opened_at, closed_at, open_reason, close_reason,
+                message_count, transcript_json
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                guild_id = VALUES(guild_id),
+                guild_name = VALUES(guild_name),
+                channel_name = VALUES(channel_name),
+                category_name = VALUES(category_name),
+                owner_id = VALUES(owner_id),
+                owner_name = VALUES(owner_name),
+                opened_by = VALUES(opened_by),
+                closed_by = VALUES(closed_by),
+                opened_at = VALUES(opened_at),
+                closed_at = VALUES(closed_at),
+                open_reason = VALUES(open_reason),
+                close_reason = VALUES(close_reason),
+                message_count = VALUES(message_count),
+                transcript_json = VALUES(transcript_json)
+            """,
+            (
+                ticket.get("channel_id"),
+                ticket.get("guild_id"),
+                ticket.get("guild_name"),
+                ticket.get("channel_name"),
+                ticket.get("category"),
+                ticket.get("owner_id"),
+                ticket.get("owner_name"),
+                opened_by,
+                closed_by,
+                opened_at,
+                closed_at,
+                open_reason,
+                close_reason,
+                len(messages),
+                transcript_json,
+            )
+        )
+        self.conn.commit()
+        return True
 
     def _ensure_single_open_ticket_constraint(self):
         try:

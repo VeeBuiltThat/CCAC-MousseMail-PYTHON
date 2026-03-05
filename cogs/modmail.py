@@ -320,6 +320,17 @@ class Modmail(commands.Cog):
 
         transcript_file = discord.File(transcript_path, filename=f"{channel.id}.json")
         await log_channel.send(embed=embed, view=view, file=transcript_file)
+
+        if hasattr(self.bot, "db") and hasattr(self.bot.db, "save_ticket_transcript"):
+            try:
+                self.bot.db.save_ticket_transcript(
+                    transcript_data,
+                    closed_by=str(author) if author else "System",
+                    close_reason=close_reason,
+                )
+            except Exception as e:
+                logger.exception("Failed to save transcript to database for channel %s: %s", channel.id, e)
+
         return True
 
     # ---------------- Commands ----------------
