@@ -19,6 +19,7 @@ CATEGORY_ID = getattr(app_config, "CATEGORY_ID", 0)
 LOG_CHANNEL_ID = getattr(app_config, "LOG_CHANNEL_ID", 0)
 TRANSCRIPT_DIR = getattr(app_config, "TRANSCRIPT_DIR", "transcripts")
 IMAGE_DIR = getattr(app_config, "IMAGE_DIR", "transcripts/images")
+STREAMLIT_PUBLIC_URL = getattr(app_config, "STREAMLIT_PUBLIC_URL", "")
 
 logger = logging.getLogger(__name__)
 
@@ -311,7 +312,7 @@ class Modmail(commands.Cog):
         embed.add_field(name="Close reason", value=close_reason, inline=False)
 
         view = None
-        public_base_url = os.getenv("STREAMLIT_PUBLIC_URL", "").rstrip("/")
+        public_base_url = (STREAMLIT_PUBLIC_URL or os.getenv("STREAMLIT_PUBLIC_URL", "")).rstrip("/")
         if public_base_url:
             transcript_url = f"{public_base_url}/?section=transcript&channel={channel.id}"
             view = discord.ui.View()

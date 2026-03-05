@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image
 from typing import List, Dict, Any
 from urllib.parse import quote
+import config as app_config
 
 try:
     import mysql.connector
@@ -206,7 +207,7 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
         if not items:
             st.write("No tickets in this category.")
             return
-        public_base_url = os.getenv("STREAMLIT_PUBLIC_URL", "").rstrip("/")
+        public_base_url = (getattr(app_config, "STREAMLIT_PUBLIC_URL", "") or os.getenv("STREAMLIT_PUBLIC_URL", "")).rstrip("/")
         for ticket in items:
             channel_id = str(ticket.get("channel_id"))
             member = ticket.get("member_username", "Unknown")
