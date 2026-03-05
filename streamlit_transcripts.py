@@ -233,15 +233,34 @@ def render_ticket_summary_panel(ticket: Dict[str, Any], messages: List[Dict[str,
     )
 
 
+def normalize_display_message(msg: Dict[str, Any]):
+    author = str(msg.get("author", "Unknown") or "Unknown")
+    content = str(msg.get("content", "") or "")
+
+    lines = [line for line in content.splitlines()]
+    if lines:
+        first_line = lines[0].strip().lower()
+        if first_line == "user message":
+            if len(lines) >= 2 and lines[1].strip():
+                author = lines[1].strip()
+                lines = lines[2:]
+            else:
+                lines = lines[1:]
+        elif first_line.startswith("staff response"):
+            lines = lines[1:]
+
+    normalized_content = "\n".join(lines).strip()
+    return author, normalized_content
+
+
 def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path, staff_identifiers: List[str], show_internal: bool, internal_markers: List[str]):
     for msg in messages:
-        content = msg.get("content", "") or ""
+        author, content = normalize_display_message(msg)
         internal = is_internal(content, internal_markers)
         if internal and not show_internal:
             continue
 
         role = str(msg.get("role", "")).lower()
-        author = msg.get("author", "Unknown")
         ts = msg.get("ts") or msg.get("timestamp") or ""
         ts_label = relative_time_label(ts) or ts
         is_system = role == "system"
@@ -254,7 +273,8 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         st.markdown(f"<div class='{card_class}'>{(content or '').replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
 
         embeds = msg.get("embeds", [])
-        if isinstance(embeds, list):
+        # Avoid duplicate rendering when embed text was already folded into content.
+        if not content and isinstance(embeds, list):
             for embed in embeds:
                 if not isinstance(embed, dict):
                     continue
