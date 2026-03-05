@@ -253,10 +253,39 @@ def normalize_display_message(msg: Dict[str, Any]):
     return author, normalized_content
 
 
+def message_is_internal(msg: Dict[str, Any], normalized_content: str, internal_markers: List[str]) -> bool:
+    role = str(msg.get("role", "")).lower()
+    raw_content = str(msg.get("content", "") or "")
+    raw_lower = raw_content.lower()
+    trimmed = normalized_content.lstrip()
+
+    if is_internal(normalized_content, internal_markers):
+        return True
+    if role == "system":
+        return True
+    if trimmed.startswith("%") or trimmed.startswith("!") or trimmed.startswith("/"):
+        return True
+    if role == "staff" and "staff response" not in raw_lower and not msg.get("embeds"):
+        return True
+    return False
+
+
+def get_avatar_url(msg: Dict[str, Any], author: str) -> str:
+    avatar_url = str(msg.get("author_avatar_url", "") or "").strip()
+    if avatar_url:
+        return avatar_url
+
+    author_id = msg.get("author_id")
+    if author_id:
+        return f"https://unavatar.io/discord/{author_id}"
+
+    return f"https://api.dicebear.com/8.x/initials/svg?seed={quote(author or 'user')}"
+
+
 def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path, staff_identifiers: List[str], show_internal: bool, internal_markers: List[str]):
     for msg in messages:
         author, content = normalize_display_message(msg)
-        internal = is_internal(content, internal_markers)
+        internal = message_is_internal(msg, content, internal_markers)
         if internal and not show_internal:
             continue
 
@@ -265,56 +294,62 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         ts_label = relative_time_label(ts) or ts
         is_system = role == "system"
 
-        st.markdown(f"**{author}**  ")
-        if ts_label:
-            st.caption(ts_label)
+        avatar_url = get_avatar_url(msg, author)
+        avatar_col, message_col = st.columns([0.09, 0.91], gap="small")
+        with avatar_col:
+            st.image(avatar_url, width=42)
 
-        card_class = "msg-card msg-system" if is_system else "msg-card"
-        st.markdown(f"<div class='{card_class}'>{(content or '').replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+        with message_col:
+            st.markdown(f"**{author}**")
+            if ts_label:
+                st.caption(ts_label)
 
-        embeds = msg.get("embeds", [])
-        # Avoid duplicate rendering when embed text was already folded into content.
-        if not content and isinstance(embeds, list):
-            for embed in embeds:
-                if not isinstance(embed, dict):
-                    continue
-                embed_title = embed.get("title", "")
-                embed_author = embed.get("author", "")
-                embed_description = embed.get("description", "")
-                embed_fields = embed.get("fields", [])
+            card_class = "msg-card msg-system" if is_system else "msg-card"
+            st.markdown(f"<div class='{card_class}'>{(content or '').replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
 
-                if embed_title:
-                    st.markdown(f"**{embed_title}**")
-                if embed_author:
-                    st.caption(embed_author)
-                if embed_description:
-                    st.write(embed_description)
-                if isinstance(embed_fields, list):
-                    for field in embed_fields:
-                        if not isinstance(field, dict):
-                            continue
-                        field_name = field.get("name", "")
-                        field_value = field.get("value", "")
-                        if field_name and field_value:
-                            st.markdown(f"**{field_name}**")
-                            st.write(field_value)
-                        elif field_value:
-                            st.write(field_value)
+            embeds = msg.get("embeds", [])
+            # Avoid duplicate rendering when embed text was already folded into content.
+            if not content and isinstance(embeds, list):
+                for embed in embeds:
+                    if not isinstance(embed, dict):
+                        continue
+                    embed_title = embed.get("title", "")
+                    embed_author = embed.get("author", "")
+                    embed_description = embed.get("description", "")
+                    embed_fields = embed.get("fields", [])
 
-        for img_path in msg.get("images", []):
-            p = Path(img_path)
-            if not p.exists():
-                p = image_root.joinpath(Path(img_path).name)
-            if p.exists():
-                try:
-                    st.image(Image.open(p), use_column_width=True)
-                except Exception as e:
-                    st.write(f"[Image could not be opened: {p} ({e})]")
-            else:
-                st.write(f"[Image not found: {img_path}]")
+                    if embed_title:
+                        st.markdown(f"**{embed_title}**")
+                    if embed_author:
+                        st.caption(embed_author)
+                    if embed_description:
+                        st.write(embed_description)
+                    if isinstance(embed_fields, list):
+                        for field in embed_fields:
+                            if not isinstance(field, dict):
+                                continue
+                            field_name = field.get("name", "")
+                            field_value = field.get("value", "")
+                            if field_name and field_value:
+                                st.markdown(f"**{field_name}**")
+                                st.write(field_value)
+                            elif field_value:
+                                st.write(field_value)
 
-        for url in msg.get("attachments", []):
-            st.markdown(f"Attachment: [{url}]({url})")
+            for img_path in msg.get("images", []):
+                p = Path(img_path)
+                if not p.exists():
+                    p = image_root.joinpath(Path(img_path).name)
+                if p.exists():
+                    try:
+                        st.image(Image.open(p), use_column_width=True)
+                    except Exception as e:
+                        st.write(f"[Image could not be opened: {p} ({e})]")
+                else:
+                    st.write(f"[Image not found: {img_path}]")
+
+            for url in msg.get("attachments", []):
+                st.markdown(f"Attachment: [{url}]({url})")
 
 
 def render_messages(messages: List[Dict[str, Any]], image_root: Path, staff_identifiers: List[str], show_internal: bool, internal_markers: List[str]):
@@ -628,7 +663,7 @@ def main():
     internal_markers_input = st.sidebar.text_input("Internal note markers (comma-separated)", value="internal,note,staff-only")
     internal_markers = [s.strip() for s in internal_markers_input.split(",") if s.strip()]
 
-    show_internal = st.sidebar.checkbox("Show internal notes", value=False)
+    show_internal = st.sidebar.toggle("Show internal notes", value=False)
 
     tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
     img_root = find_dir(DEFAULT_IMAGE_DIRS)

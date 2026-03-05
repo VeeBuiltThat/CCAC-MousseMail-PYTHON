@@ -201,6 +201,7 @@ class Modmail(commands.Cog):
             "title": embed.title or "",
             "description": embed.description or "",
             "author": embed.author.name if embed.author and embed.author.name else "",
+            "author_icon_url": embed.author.icon_url if embed.author and embed.author.icon_url else "",
             "fields": [],
         }
 
@@ -258,6 +259,7 @@ class Modmail(commands.Cog):
                 "timestamp": msg.created_at.isoformat(),
                 "author": str(msg.author),
                 "author_id": msg.author.id,
+                "author_avatar_url": str(msg.author.display_avatar.url) if getattr(msg.author, "display_avatar", None) else "",
                 "role": role,
                 "content": msg.content or "",
                 "embeds": [],
@@ -294,6 +296,11 @@ class Modmail(commands.Cog):
             # (this preserves user/staff identity in forwarded embed-style modmail messages).
             if msg.author.bot and embed_author_names:
                 entry["author"] = embed_author_names[0]
+                for embed_payload in entry.get("embeds", []):
+                    icon_url = embed_payload.get("author_icon_url") if isinstance(embed_payload, dict) else ""
+                    if icon_url:
+                        entry["author_avatar_url"] = icon_url
+                        break
 
             # Additional role inference based on embed metadata when available.
             if embed_author_names and entry["role"] == "system":
