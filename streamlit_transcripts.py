@@ -171,6 +171,38 @@ def query_mysql_tickets():
     return None
 
 
+def query_mysql_transcripts_map() -> Dict[str, Dict[str, Any]]:
+    """Return map[channel_id] => transcript JSON payload from ticket_transcripts table."""
+    if not MYSQL_AVAILABLE:
+        return {}
+
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT channel_id, transcript_json FROM ticket_transcripts ORDER BY updated_at DESC LIMIT 2000"
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            channel_id = str(row.get("channel_id"))
+            payload = row.get("transcript_json")
+            if not channel_id or not isinstance(payload, str):
+                continue
+            try:
+                parsed = json.loads(payload)
+                if isinstance(parsed, dict):
+                    result[channel_id] = parsed
+            except Exception:
+                continue
+        return result
+    except Exception:
+        return {}
+
+
 def list_transcript_files(transcript_dir: Path) -> Dict[str, Path]:
     if not transcript_dir.exists():
         return {}
@@ -192,7 +224,7 @@ def normalize_query_value(value: Any) -> str:
     return value or ""
 
 
-def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path]):
+def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path], db_transcripts_map: Dict[str, Dict[str, Any]]):
     st.subheader("Logs")
     if not tickets:
         st.info("No tickets found in database.")
@@ -215,7 +247,7 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
             created = ticket.get("created_at", "")
             relative_link = f"?section=transcript&channel={quote(channel_id)}"
             copy_link = f"{public_base_url}/{relative_link}" if public_base_url else relative_link
-            has_transcript = channel_id in transcript_map
+            has_transcript = channel_id in transcript_map or channel_id in db_transcripts_map
             icon = "🟢" if str(ticket.get("status", "")).lower() == "open" else "🔴"
             st.markdown(f"{icon} **#{channel_id}** · {member} · mod: {mod} · created: {created}")
             col_open, col_copy = st.columns([0.25, 0.75])
@@ -239,6 +271,7 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
 
 def render_transcript_view(
     transcript_map: Dict[str, Path],
+    db_transcripts_map: Dict[str, Dict[str, Any]],
     image_root: Path,
     staff_identifiers: List[str],
     show_internal: bool,
@@ -246,26 +279,31 @@ def render_transcript_view(
     preselected_channel: str,
 ):
     st.subheader("Transcript View")
-    if not transcript_map:
+    available_channel_ids = sorted(set(list(transcript_map.keys()) + list(db_transcripts_map.keys())), reverse=True)
+
+    if not available_channel_ids:
         st.warning("No transcript files found.")
         return
 
-    channel_ids = sorted(transcript_map.keys(), reverse=True)
     default_index = 0
-    if preselected_channel and preselected_channel in transcript_map:
-        default_index = channel_ids.index(preselected_channel)
+    if preselected_channel and preselected_channel in available_channel_ids:
+        default_index = available_channel_ids.index(preselected_channel)
 
-    selected_channel = st.selectbox("Select ticket channel", channel_ids, index=default_index)
-    selected_path = transcript_map[selected_channel]
-
-    st.caption(f"Transcript file: {selected_path}")
+    selected_channel = st.selectbox("Select ticket channel", available_channel_ids, index=default_index)
     messages = []
-    if selected_path.suffix.lower() == ".json":
-        transcript_json = load_transcript_json(selected_path)
-        messages = transcript_json.get("messages", []) if isinstance(transcript_json, dict) else []
+    if selected_channel in transcript_map:
+        selected_path = transcript_map[selected_channel]
+        st.caption(f"Transcript file: {selected_path}")
+        if selected_path.suffix.lower() == ".json":
+            transcript_json = load_transcript_json(selected_path)
+            messages = transcript_json.get("messages", []) if isinstance(transcript_json, dict) else []
+        else:
+            raw = load_transcript_file(selected_path)
+            messages = parse_transcript(raw)
     else:
-        raw = load_transcript_file(selected_path)
-        messages = parse_transcript(raw)
+        transcript_json = db_transcripts_map.get(selected_channel, {})
+        st.caption("Transcript source: database")
+        messages = transcript_json.get("messages", []) if isinstance(transcript_json, dict) else []
 
     if not messages:
         st.info("Transcript is empty or could not be parsed.")
@@ -353,10 +391,12 @@ def main():
     tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
     img_root = find_dir(DEFAULT_IMAGE_DIRS)
     transcript_map = list_transcript_files(tdir)
+    db_transcripts_map = query_mysql_transcripts_map()
     tickets = query_mysql_tickets() or []
 
     st.sidebar.caption(f"Transcripts dir: {tdir}")
-    st.sidebar.caption(f"Detected transcripts: {len(transcript_map)}")
+    st.sidebar.caption(f"Detected local transcripts: {len(transcript_map)}")
+    st.sidebar.caption(f"Detected DB transcripts: {len(db_transcripts_map)}")
 
     if section_key == "overview":
         st.subheader("Overview")
@@ -365,16 +405,17 @@ def main():
         c1, c2, c3 = st.columns(3)
         c1.metric("Open tickets", open_count)
         c2.metric("Closed tickets", closed_count)
-        c3.metric("Transcript files", len(transcript_map))
+        c3.metric("Transcripts", len(set(list(transcript_map.keys()) + list(db_transcripts_map.keys()))))
         st.write("Use **Logs** to browse ticket status and open transcript links.")
         st.write("Use **Transcript View** to read full conversation history.")
 
     elif section_key == "logs":
-        render_logs_view(tickets, transcript_map)
+        render_logs_view(tickets, transcript_map, db_transcripts_map)
 
     elif section_key == "transcript":
         render_transcript_view(
             transcript_map,
+            db_transcripts_map,
             img_root,
             staff_identifiers,
             show_internal,
