@@ -266,10 +266,13 @@ class Modmail(commands.Cog):
             }
 
             embed_text_parts = []
+            embed_author_names = []
             if msg.embeds:
                 for embed in msg.embeds:
                     payload = self._extract_embed_payload(embed)
                     entry["embeds"].append(payload)
+                    if payload.get("author"):
+                        embed_author_names.append(payload["author"])
                     embed_text = self._embed_payload_to_text(payload)
                     if embed_text:
                         embed_text_parts.append(embed_text)
@@ -285,6 +288,16 @@ class Modmail(commands.Cog):
                 if "staff response" in role_hint_text:
                     entry["role"] = "staff"
                 elif "user message" in role_hint_text:
+                    entry["role"] = "user"
+
+            # If message was posted by the bot, use embed author as the actual speaker name
+            # (this preserves user/staff identity in forwarded embed-style modmail messages).
+            if msg.author.bot and embed_author_names:
+                entry["author"] = embed_author_names[0]
+
+            # Additional role inference based on embed metadata when available.
+            if embed_author_names and entry["role"] == "system":
+                if ticket_owner and embed_author_names[0].split("#")[0].lower() == str(ticket_owner).split("#")[0].lower():
                     entry["role"] = "user"
 
             for attachment in msg.attachments:
