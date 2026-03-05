@@ -253,6 +253,30 @@ def normalize_display_message(msg: Dict[str, Any]):
     return author, normalized_content
 
 
+def is_staff_response_message(msg: Dict[str, Any], normalized_content: str) -> bool:
+    raw_content = str(msg.get("content", "") or "")
+    raw_lower = raw_content.lower()
+    normalized_lower = (normalized_content or "").lower()
+
+    if raw_lower.startswith("%r ") or raw_lower == "%r":
+        return True
+    if "staff response" in raw_lower or normalized_lower.startswith("staff response"):
+        return True
+
+    embeds = msg.get("embeds", [])
+    if isinstance(embeds, list):
+        for embed in embeds:
+            if not isinstance(embed, dict):
+                continue
+            title = str(embed.get("title", "") or "").lower()
+            author = str(embed.get("author", "") or "").lower()
+            description = str(embed.get("description", "") or "").lower()
+            if "staff response" in title or "staff response" in author or "staff response" in description:
+                return True
+
+    return False
+
+
 def message_is_internal(msg: Dict[str, Any], normalized_content: str, internal_markers: List[str]) -> bool:
     role = str(msg.get("role", "")).lower()
     raw_content = str(msg.get("content", "") or "")
@@ -263,9 +287,9 @@ def message_is_internal(msg: Dict[str, Any], normalized_content: str, internal_m
         return True
     if role == "system":
         return True
+    if role == "staff":
+        return not is_staff_response_message(msg, normalized_content)
     if trimmed.startswith("%") or trimmed.startswith("!") or trimmed.startswith("/"):
-        return True
-    if role == "staff" and "staff response" not in raw_lower and not msg.get("embeds"):
         return True
     return False
 
