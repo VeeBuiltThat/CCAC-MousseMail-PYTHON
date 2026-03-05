@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import os
 import asyncio
-import random
 import discord
 from discord.ext import commands
 from aiohttp import ClientSession
@@ -23,8 +22,9 @@ TICKET_MESSAGES = getattr(app_config, "TICKET_MESSAGES", [])
 TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")
 LOG_DIR = getattr(app_config, "LOG_DIR", "logs")
 TICKET_REMINDER_HOURS = getattr(app_config, "TICKET_REMINDER_HOURS", 48)
-BOT_TOKEN = getattr(app_config, "BOT_TOKEN", None)
-BOT_BUILD_MARKER = "2026-03-04T14:58Z-note-fix-v3"
+BOT_TOKEN = getattr(app_config, "BOT_TOKEN", None) or getattr(app_config, "DISCORD_TOKEN", None)
+
+BOT_BUILD_MARKER = getattr(app_config, "BOT_BUILD_MARKER", "2026-03-04T14:58Z-note-fix-v3")
 
 from note_manager import NoteManager
 
@@ -41,7 +41,21 @@ def configure_logging():
         handlers=[logging.StreamHandler()]
     )
 
-temp_dir = "."
+
+def resolve_bot_token(config_manager=None):
+    candidates = [
+        getattr(app_config, "BOT_TOKEN", None),
+        getattr(app_config, "DISCORD_TOKEN", None),
+    ]
+
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        cleaned = candidate.strip().strip('"').strip("'")
+        if cleaned:
+            return cleaned
+
+    return None
 
 
 class ModmailBot(commands.Bot):
@@ -65,6 +79,7 @@ class ModmailBot(commands.Bot):
             "cogs.category_management",
             "cogs.modmail"
         ]
+        self._extensions_loaded = False
         self._connected = asyncio.Event()
 
         self.guild_id = GUILD_ID
@@ -72,15 +87,15 @@ class ModmailBot(commands.Bot):
         self.db = DatabaseManager(self)
         self.note_manager = NoteManager(self)
 
-        log_dir = os.path.join(temp_dir, "logs")
-        os.makedirs(log_dir, exist_ok=True)
-        self.log_file_path = os.path.join(log_dir, "modmail.log")
+        self.log_file_path = os.path.join(TEMP_DIR, LOG_DIR, "modmail.log")
         configure_logging()
 
     async def on_ready(self):
         logger.info(f"Bot ready as {self.user} (ID: {self.user.id})")
         logger.info(f"Build marker: {BOT_BUILD_MARKER} | file={__file__}")
-        await self.load_extensions()
+        if not self._extensions_loaded:
+            await self.load_extensions()
+            self._extensions_loaded = True
         self.loop.create_task(self.timer_task())
         self._connected.set()
 
@@ -251,7 +266,7 @@ class ModmailBot(commands.Bot):
 
         if channel_id:
             if channel is None:
-                await self.db.close_ticket(channel_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+                self.db.close_ticket(channel_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                 self.confirmed_users.discard(user.id)
             else:
                 self.db.cancel_ticket_timer(channel_id, "suspend")
@@ -321,7 +336,7 @@ class ModmailBot(commands.Bot):
 
                 channel_id = self.db.get_open_ticket_channel_id(user_id)
                 if channel_id == channel.id:
-                    await self.db.close_ticket(user_id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+                    self.db.close_ticket(channel.id, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
                     self.confirmed_users.discard(user_id)
                     logger.info(f"Removed ticket for user {user_id} due to channel deletion.")
             except Exception as e:
@@ -332,7 +347,11 @@ class ModmailBot(commands.Bot):
             async with self:
                 self.session = ClientSession()
                 self.db.setup()
-                await self.start(BOT_TOKEN)
+                token = resolve_bot_token(self.config)
+                if not token:
+                    logger.error("Bot token is missing. Set BOT_TOKEN or DISCORD_TOKEN in config/env.")
+                    return
+                await self.start(token)
 
         asyncio.run(runner())
 
@@ -458,6 +477,26 @@ class ClaimTicketButton(discord.ui.View):
 
 
 async def send_category_details(interaction: discord.Interaction, category_key: str):
+    try:
+        await _send_category_details(interaction, category_key)
+    except Exception:
+        logger.exception("send_category_details failed")
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "⚠️ Something went wrong while opening your ticket. Please try again.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "⚠️ Something went wrong while opening your ticket. Please try again.",
+                    ephemeral=True
+                )
+        except Exception:
+            pass
+
+
+async def _send_category_details(interaction: discord.Interaction, category_key: str):
     bot: ModmailBot = interaction.client
     user = interaction.user
     guild = interaction.guild
@@ -492,6 +531,12 @@ async def send_category_details(interaction: discord.Interaction, category_key: 
         return
 
     category_id = CATEGORY_IDS.get(category_key)
+    if not category_id:
+        await interaction.followup.send(
+            "⚠️ That ticket category is not configured. Please contact staff.",
+            ephemeral=True
+        )
+        return
 
     details_map = {
         "contact": (

@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import streamlit as st
 from pathlib import Path
 from PIL import Image
@@ -46,6 +47,13 @@ def load_transcript_file(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except Exception as e:
         return f"Error reading file: {e}"
+
+
+def load_transcript_json(path: Path) -> Dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 MSG_RE = re.compile(r"^\[(?P<ts>[^\]]+)\]\s+(?P<author>[^:]+):\s*(?P<content>.*)$")
@@ -113,17 +121,17 @@ def render_messages(messages: List[Dict[str, Any]], image_root: Path, staff_iden
         if internal and not show_internal:
             continue
 
-        staff = is_staff(msg.get("author", ""), staff_identifiers)
+        role = str(msg.get("role", "")).lower()
+        staff = role == "staff" or is_staff(msg.get("author", ""), staff_identifiers)
+        bubble_role = "assistant" if staff else "user"
+        ts = msg.get("ts") or msg.get("timestamp") or ""
 
-        cols = st.columns([0.12, 0.88])
-        with cols[0]:
-            if staff:
-                st.markdown("**Staff**")
-            else:
-                st.markdown("**User**")
-        with cols[1]:
-            st.markdown(f"**{msg.get('author','')}** — _{msg.get('ts','')}_")
+        with st.chat_message(bubble_role):
+            st.markdown(f"**{msg.get('author', '')}**  ")
+            if ts:
+                st.caption(ts)
             st.write(msg.get("content", ""))
+
             for img_path in msg.get("images", []):
                 p = Path(img_path)
                 if not p.exists():
@@ -135,6 +143,7 @@ def render_messages(messages: List[Dict[str, Any]], image_root: Path, staff_iden
                         st.write(f"[Image could not be opened: {p} ({e})]")
                 else:
                     st.write(f"[Image not found: {img_path}]")
+
             for url in msg.get("attachments", []):
                 st.markdown(f"Attachment: [{url}]({url})")
 
@@ -165,9 +174,14 @@ def list_transcript_files(transcript_dir: Path) -> Dict[str, Path]:
     if not transcript_dir.exists():
         return {}
     mapping = {}
+    for p in transcript_dir.glob("*.json"):
+        channel_id = p.stem
+        if channel_id.isdigit():
+            mapping[channel_id] = p
     for p in transcript_dir.glob("*.txt"):
         channel_id = p.stem
-        mapping[channel_id] = p
+        if channel_id.isdigit() and channel_id not in mapping:
+            mapping[channel_id] = p
     return mapping
 
 
@@ -244,8 +258,13 @@ def render_transcript_view(
     selected_path = transcript_map[selected_channel]
 
     st.caption(f"Transcript file: {selected_path}")
-    raw = load_transcript_file(selected_path)
-    messages = parse_transcript(raw)
+    messages = []
+    if selected_path.suffix.lower() == ".json":
+        transcript_json = load_transcript_json(selected_path)
+        messages = transcript_json.get("messages", []) if isinstance(transcript_json, dict) else []
+    else:
+        raw = load_transcript_file(selected_path)
+        messages = parse_transcript(raw)
 
     if not messages:
         st.info("Transcript is empty or could not be parsed.")

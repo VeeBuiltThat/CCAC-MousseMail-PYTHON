@@ -6,6 +6,7 @@ import re
 import logging
 from datetime import datetime, timedelta, timezone
 import os
+import json
 import aiohttp
 import config as app_config
 
@@ -194,11 +195,34 @@ class Modmail(commands.Cog):
 
     # ---------------- Transcript ----------------
 
-    async def generate_transcript(self, channel: discord.TextChannel) -> discord.File:
-        transcript = ""
+    async def generate_transcript(self, channel: discord.TextChannel):
+        transcript_messages = []
         os.makedirs(IMAGE_DIR, exist_ok=True)
+
+        ticket_owner_id = self._get_user_id_from_topic(getattr(channel, "topic", "") or "")
+        ticket_owner = None
+        if ticket_owner_id:
+            ticket_owner = self.bot.get_user(ticket_owner_id)
+
         async for msg in channel.history(limit=None, oldest_first=True):
-            transcript += f"[{msg.created_at}] {msg.author}: {msg.content}\n"
+            role = "system"
+            if ticket_owner_id and msg.author.id == ticket_owner_id:
+                role = "user"
+            elif getattr(msg.author, "guild_permissions", None):
+                perms = msg.author.guild_permissions
+                if perms.manage_channels or perms.manage_messages or perms.administrator:
+                    role = "staff"
+
+            entry = {
+                "timestamp": msg.created_at.isoformat(),
+                "author": str(msg.author),
+                "author_id": msg.author.id,
+                "role": role,
+                "content": msg.content or "",
+                "images": [],
+                "attachments": [],
+            }
+
             for attachment in msg.attachments:
                 # Save all images, regardless of sender
                 if attachment.content_type and attachment.content_type.startswith("image/"):
@@ -208,16 +232,31 @@ class Modmail(commands.Cog):
                             if resp.status == 200:
                                 with open(image_path, "wb") as f:
                                     f.write(await resp.read())
-                    transcript += f"[Image saved: {image_path}]\n"
+                    entry["images"].append(image_path)
                 else:
-                    transcript += f"[Attachment: {attachment.url}]\n"
-            transcript += "\n"
+                    entry["attachments"].append(attachment.url)
 
-        transcript_path = os.path.join(TRANSCRIPT_DIR, f"{channel.id}.txt")
+            transcript_messages.append(entry)
+
+        transcript_data = {
+            "ticket": {
+                "channel_id": channel.id,
+                "channel_name": channel.name,
+                "category": channel.category.name if channel.category else "Unknown",
+                "guild_id": channel.guild.id,
+                "guild_name": channel.guild.name,
+                "owner_id": ticket_owner_id,
+                "owner_name": str(ticket_owner) if ticket_owner else None,
+                "closed_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "messages": transcript_messages,
+        }
+
+        transcript_path = os.path.join(TRANSCRIPT_DIR, f"{channel.id}.json")
         with open(transcript_path, "w", encoding="utf-8") as f:
-            f.write(transcript)
+            json.dump(transcript_data, f, indent=2, ensure_ascii=False)
 
-        return discord.File(transcript_path, filename="transcript.txt")
+        return transcript_path, transcript_data
 
     # ---------------- Role Checks ----------------
 
@@ -237,14 +276,49 @@ class Modmail(commands.Cog):
         if not log_channel:
             return False
 
-        transcript = await self.generate_transcript(channel)
+        transcript_path, transcript_data = await self.generate_transcript(channel)
+        messages = transcript_data.get("messages", [])
+
+        first_user_message = None
+        for message in messages:
+            if message.get("role") == "user" and (message.get("content") or "").strip():
+                first_user_message = message.get("content", "").strip()
+                break
+
+        close_reason = "Resolved"
+        opened_at = "Unknown"
+        if messages:
+            opened_at = messages[0].get("timestamp", "Unknown")
+
         embed = discord.Embed(
-            title="Transcript generated",
-            description=f"Ticket logged: `{channel.name}`" + (f" by {author.mention}" if author else ""),
-            color=discord.Color.green(),
+            title="Ticket Closed",
+            description=f"Transcript from **{channel.guild.name}** was closed.",
+            color=discord.Color.blurple(),
             timestamp=datetime.now(timezone.utc)
         )
-        await log_channel.send(embed=embed, file=transcript)
+
+        embed.add_field(name="Ticket Id", value=str(channel.id), inline=True)
+        embed.add_field(name="Category", value=channel.category.name if channel.category else "Unknown", inline=True)
+        embed.add_field(name="Opened at", value=opened_at, inline=True)
+        embed.add_field(name="Closed at", value=datetime.now(timezone.utc).isoformat(), inline=True)
+        embed.add_field(name="Opened by", value=transcript_data.get("ticket", {}).get("owner_name") or "Unknown", inline=True)
+        embed.add_field(name="Closed by", value=author.mention if author else "System", inline=True)
+
+        if first_user_message:
+            open_reason = first_user_message[:1000]
+            embed.add_field(name="Open reason", value=open_reason, inline=False)
+
+        embed.add_field(name="Close reason", value=close_reason, inline=False)
+
+        view = None
+        public_base_url = os.getenv("STREAMLIT_PUBLIC_URL", "").rstrip("/")
+        if public_base_url:
+            transcript_url = f"{public_base_url}/?section=transcript&channel={channel.id}"
+            view = discord.ui.View()
+            view.add_item(discord.ui.Button(label="View transcript", url=transcript_url))
+
+        transcript_file = discord.File(transcript_path, filename=f"{channel.id}.json")
+        await log_channel.send(embed=embed, view=view, file=transcript_file)
         return True
 
     # ---------------- Commands ----------------

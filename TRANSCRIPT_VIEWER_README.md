@@ -4,7 +4,7 @@ A staff-only Streamlit app for viewing and searching Discord modmail transcripts
 
 ## Features
 
-✅ **Local Transcript Viewing** – Reads `.txt` transcript files from `transcripts/` or `logs/`  
+✅ **Local Transcript Viewing** – Reads channel transcript `.json` files (with `.txt` fallback) from `transcripts/` or `logs/`  
 ✅ **Image Rendering** – Automatically embeds saved images from `transcripts/images/`  
 ✅ **Message Separation** – Distinguishes user vs. staff messages based on author names  
 ✅ **Internal Toggle** – Hide/show internal staff notes with a UI checkbox  
@@ -59,18 +59,33 @@ A staff-only Streamlit app for viewing and searching Discord modmail transcripts
 
 ## Transcript File Format
 
-The bot saves transcripts as plain text with metadata:
+The bot now saves transcripts as structured JSON per channel (`<channel_id>.json`):
 
+```json
+{
+   "ticket": {
+      "channel_id": 1234567890,
+      "channel_name": "dx-example",
+      "category": "Appeals",
+      "owner_id": 123456789012345678,
+      "owner_name": "User#1234",
+      "closed_at": "2026-03-05T12:34:56.000000+00:00"
+   },
+   "messages": [
+      {
+         "timestamp": "2026-03-05T12:00:00.000000+00:00",
+         "author": "User#1234",
+         "author_id": 123456789012345678,
+         "role": "user",
+         "content": "Hello, I need help",
+         "images": ["transcripts/images/123...png"],
+         "attachments": ["https://..."]
+      }
+   ]
+}
 ```
-[2026-03-04 14:23:45.123000+00:00] User#1234: Hello, I need help
-[Image saved: transcripts/images/1234567890_12345_screenshot.png]
 
-[2026-03-04 14:24:15.456000+00:00] ModStaff#5678: I can help with that
-[Attachment: https://discord.com/api/webhooks/...]
-
-```
-
-The parser extracts messages, timestamps, images, and attachments automatically.
+Legacy `.txt` transcripts are still supported as fallback.
 
 ## Configuration
 
@@ -101,7 +116,7 @@ The app will automatically detect and query the transcript table.
 ## Troubleshooting
 
 **"No transcript files found"**  
-Check that transcript files (`.txt`) exist in `transcripts/` and images in `transcripts/images/`.
+Check that transcript files (`.json` or legacy `.txt`) exist in `transcripts/` and images in `transcripts/images/`.
 
 **"Image not found"**  
 Ensure the bot's `IMAGE_DIR` config matches the `DEFAULT_IMAGE_DIRS` in the app.
