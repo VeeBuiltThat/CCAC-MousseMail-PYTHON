@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image
 from typing import List, Dict, Any
 from urllib.parse import quote
+from datetime import datetime, timezone
 
 
 try:
@@ -114,6 +115,186 @@ def is_internal(content: str, internal_markers: List[str]) -> bool:
         if m.lower() in content.lower():
             return True
     return False
+
+
+def parse_iso_timestamp(value: str):
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def relative_time_label(value: str) -> str:
+    ts = parse_iso_timestamp(value)
+    if not ts:
+        return ""
+    now = datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    delta = now - ts
+    seconds = int(max(delta.total_seconds(), 0))
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = hours // 24
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def inject_transcript_styles():
+    st.markdown(
+        """
+        <style>
+        .ticket-summary-card {
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            padding: 16px;
+            background: rgba(23, 30, 52, 0.65);
+        }
+        .ticket-summary-row {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .ticket-summary-row:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+        .ticket-summary-label {
+            font-size: 0.9rem;
+            color: #c9d1e6;
+            font-weight: 700;
+        }
+        .ticket-summary-value {
+            margin-top: 4px;
+            color: #f4f6ff;
+        }
+        .msg-card {
+            border-left: 3px solid rgba(122, 162, 255, 0.65);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin: 8px 0 14px;
+            background: rgba(41, 52, 84, 0.45);
+        }
+        .msg-system {
+            border-left-color: rgba(55, 221, 161, 0.9);
+            background: rgba(31, 74, 67, 0.28);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def infer_closed_by(messages: List[Dict[str, Any]], staff_identifiers: List[str]) -> str:
+    for msg in reversed(messages):
+        role = str(msg.get("role", "")).lower()
+        author = msg.get("author", "Unknown")
+        if role == "staff" or is_staff(author, staff_identifiers):
+            return author
+    return "Unknown"
+
+
+def render_ticket_summary_panel(ticket: Dict[str, Any], messages: List[Dict[str, Any]], staff_identifiers: List[str]):
+    server_name = ticket.get("guild_name") or "Unknown"
+    owner_name = ticket.get("owner_name") or "Unknown"
+    closed_by = infer_closed_by(messages, staff_identifiers)
+    members_value = f"{owner_name}, {closed_by}" if closed_by != owner_name else owner_name
+
+    st.markdown(
+        f"""
+        <div class="ticket-summary-card">
+            <div class="ticket-summary-row">
+                <div class="ticket-summary-label">Server name</div>
+                <div class="ticket-summary-value">{server_name}</div>
+            </div>
+            <div class="ticket-summary-row">
+                <div class="ticket-summary-label">Members</div>
+                <div class="ticket-summary-value">{members_value}</div>
+            </div>
+            <div class="ticket-summary-row">
+                <div class="ticket-summary-label">Messages</div>
+                <div class="ticket-summary-value">{len(messages)}</div>
+            </div>
+            <div class="ticket-summary-row">
+                <div class="ticket-summary-label">Closed by</div>
+                <div class="ticket-summary-value">{closed_by}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path, staff_identifiers: List[str], show_internal: bool, internal_markers: List[str]):
+    for msg in messages:
+        content = msg.get("content", "") or ""
+        internal = is_internal(content, internal_markers)
+        if internal and not show_internal:
+            continue
+
+        role = str(msg.get("role", "")).lower()
+        author = msg.get("author", "Unknown")
+        ts = msg.get("ts") or msg.get("timestamp") or ""
+        ts_label = relative_time_label(ts) or ts
+        is_system = role == "system"
+
+        st.markdown(f"**{author}**  ")
+        if ts_label:
+            st.caption(ts_label)
+
+        card_class = "msg-card msg-system" if is_system else "msg-card"
+        st.markdown(f"<div class='{card_class}'>{(content or '').replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+
+        embeds = msg.get("embeds", [])
+        if isinstance(embeds, list):
+            for embed in embeds:
+                if not isinstance(embed, dict):
+                    continue
+                embed_title = embed.get("title", "")
+                embed_author = embed.get("author", "")
+                embed_description = embed.get("description", "")
+                embed_fields = embed.get("fields", [])
+
+                if embed_title:
+                    st.markdown(f"**{embed_title}**")
+                if embed_author:
+                    st.caption(embed_author)
+                if embed_description:
+                    st.write(embed_description)
+                if isinstance(embed_fields, list):
+                    for field in embed_fields:
+                        if not isinstance(field, dict):
+                            continue
+                        field_name = field.get("name", "")
+                        field_value = field.get("value", "")
+                        if field_name and field_value:
+                            st.markdown(f"**{field_name}**")
+                            st.write(field_value)
+                        elif field_value:
+                            st.write(field_value)
+
+        for img_path in msg.get("images", []):
+            p = Path(img_path)
+            if not p.exists():
+                p = image_root.joinpath(Path(img_path).name)
+            if p.exists():
+                try:
+                    st.image(Image.open(p), use_column_width=True)
+                except Exception as e:
+                    st.write(f"[Image could not be opened: {p} ({e})]")
+            else:
+                st.write(f"[Image not found: {img_path}]")
+
+        for url in msg.get("attachments", []):
+            st.markdown(f"Attachment: [{url}]({url})")
 
 
 def render_messages(messages: List[Dict[str, Any]], image_root: Path, staff_identifiers: List[str], show_internal: bool, internal_markers: List[str]):
@@ -308,6 +489,7 @@ def render_transcript_view(
     preselected_channel: str,
 ):
     st.subheader("Transcript View")
+    inject_transcript_styles()
     available_channel_ids = sorted(set(list(transcript_map.keys()) + list(db_transcripts_map.keys())), reverse=True)
 
     if not available_channel_ids:
@@ -319,6 +501,7 @@ def render_transcript_view(
         default_index = available_channel_ids.index(preselected_channel)
 
     selected_channel = st.selectbox("Select ticket channel", available_channel_ids, index=default_index)
+    transcript_json: Dict[str, Any] = {}
     messages = []
     if selected_channel in transcript_map:
         selected_path = transcript_map[selected_channel]
@@ -329,6 +512,7 @@ def render_transcript_view(
         else:
             raw = load_transcript_file(selected_path)
             messages = parse_transcript(raw)
+            transcript_json = {"ticket": {"channel_id": selected_channel}, "messages": messages}
     else:
         transcript_json = db_transcripts_map.get(selected_channel, {})
         st.caption("Transcript source: database")
@@ -338,8 +522,17 @@ def render_transcript_view(
         st.info("Transcript is empty or could not be parsed.")
         return
 
-    st.write(f"Messages: **{len(messages)}**")
-    render_messages(messages, image_root, staff_identifiers, show_internal, internal_markers)
+    ticket = transcript_json.get("ticket", {}) if isinstance(transcript_json, dict) else {}
+
+    left_col, right_col = st.columns([1.0, 2.2], gap="large")
+    with left_col:
+        render_ticket_summary_panel(ticket, messages, staff_identifiers)
+
+    with right_col:
+        category = ticket.get("category") or "Transcript"
+        st.markdown(f"## {category}")
+        st.write(f"Messages: **{len(messages)}**")
+        render_messages_appy_style(messages, image_root, staff_identifiers, show_internal, internal_markers)
 
 
 def query_custom_url(url: str):
