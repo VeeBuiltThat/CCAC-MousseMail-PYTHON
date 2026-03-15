@@ -42,6 +42,7 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 DISCORD_AUTH_URL = "https://discord.com/oauth2/authorize"
 CCAC_MAIN_GUILD_ID = 1240448660266029126
 CCAC_STREAMLIT_ROLE_ID = 1334950965408956527
+APP_ROOT = Path(__file__).resolve().parent
 
 # MySQL Database configuration (same as bot)
 DB_CONFIG = {
@@ -53,7 +54,17 @@ DB_CONFIG = {
 }
 
 if load_dotenv is not None:
-    load_dotenv()
+    load_dotenv(APP_ROOT / ".env")
+
+
+def get_secret_value(key: str, default: str = "") -> str:
+    try:
+        value = st.secrets.get(key) if hasattr(st, "secrets") else None
+    except Exception:
+        value = None
+    if value in (None, ""):
+        return default
+    return str(value).strip()
 
 
 def http_json(url: str, *, method: str = "GET", headers: Dict[str, str] = None, data: bytes = None) -> Dict[str, Any]:
@@ -68,12 +79,14 @@ def get_discord_oauth_settings() -> Dict[str, str]:
     config_client_secret = getattr(app_config, "DISCORD_CLIENT_SECRET", "") if app_config else ""
     config_redirect_uri = getattr(app_config, "DISCORD_REDIRECT_URI", "") if app_config else ""
 
-    client_id = str(os.getenv("DISCORD_CLIENT_ID") or config_client_id or "").strip()
-    client_secret = str(os.getenv("DISCORD_CLIENT_SECRET") or config_client_secret or "").strip()
+    client_id = str(os.getenv("DISCORD_CLIENT_ID") or get_secret_value("DISCORD_CLIENT_ID") or config_client_id or "").strip()
+    client_secret = str(os.getenv("DISCORD_CLIENT_SECRET") or get_secret_value("DISCORD_CLIENT_SECRET") or config_client_secret or "").strip()
     redirect_uri = str(
         os.getenv("DISCORD_REDIRECT_URI")
+        or get_secret_value("DISCORD_REDIRECT_URI")
         or config_redirect_uri
         or os.getenv("STREAMLIT_PUBLIC_URL", "")
+        or get_secret_value("STREAMLIT_PUBLIC_URL")
     ).strip()
     return {
         "client_id": client_id,
@@ -131,8 +144,17 @@ def ensure_discord_auth() -> Dict[str, Any]:
         st.session_state.discord_oauth_state = secrets.token_urlsafe(24)
 
     settings = get_discord_oauth_settings()
-    if not settings["client_id"] or not settings["client_secret"] or not settings["redirect_uri"]:
-        st.error("Discord OAuth is not configured. Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI.")
+    missing = [
+        key
+        for key, value in (
+            ("DISCORD_CLIENT_ID", settings["client_id"]),
+            ("DISCORD_CLIENT_SECRET", settings["client_secret"]),
+            ("DISCORD_REDIRECT_URI", settings["redirect_uri"]),
+        )
+        if not value
+    ]
+    if missing:
+        st.error(f"Discord OAuth is not configured. Missing: {', '.join(missing)}")
         st.stop()
 
     raw_code = st.query_params.get("code", "")
