@@ -1,11 +1,14 @@
 import os
 import re
 import json
+import secrets
 import streamlit as st
 from pathlib import Path
 from PIL import Image
 from typing import List, Dict, Any
 from urllib.parse import quote
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from datetime import datetime, timezone
 
 
@@ -25,6 +28,10 @@ except Exception:
 
 DEFAULT_TRANSCRIPT_DIRS = ["transcripts", "logs"]
 DEFAULT_IMAGE_DIRS = ["transcripts/images", "logs/images", "images"]
+DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_AUTH_URL = "https://discord.com/oauth2/authorize"
+CCAC_MAIN_GUILD_ID = 1240448660266029126
+CCAC_STREAMLIT_ROLE_ID = 1334950965408956527
 
 # MySQL Database configuration (same as bot)
 DB_CONFIG = {
@@ -34,6 +41,118 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASS", "XzaXNWotYim7AWlIeudHjSoO"),
     "database": os.getenv("DB_NAME", "s1079393_ModMail"),
 }
+
+
+def http_json(url: str, *, method: str = "GET", headers: Dict[str, str] = None, data: bytes = None) -> Dict[str, Any]:
+    req = Request(url, data=data, headers=headers or {}, method=method)
+    with urlopen(req, timeout=20) as response:
+        payload = response.read().decode("utf-8")
+        return json.loads(payload) if payload else {}
+
+
+def get_discord_oauth_settings() -> Dict[str, str]:
+    client_id = os.getenv("DISCORD_CLIENT_ID", "").strip()
+    client_secret = os.getenv("DISCORD_CLIENT_SECRET", "").strip()
+    redirect_uri = os.getenv("DISCORD_REDIRECT_URI", os.getenv("STREAMLIT_PUBLIC_URL", "")).strip()
+    return {
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+    }
+
+
+def build_discord_login_url(state: str) -> str:
+    settings = get_discord_oauth_settings()
+    params = {
+        "client_id": settings["client_id"],
+        "redirect_uri": settings["redirect_uri"],
+        "response_type": "code",
+        "scope": "identify guilds guilds.members.read",
+        "state": state,
+        "prompt": "consent",
+    }
+    return f"{DISCORD_AUTH_URL}?{urlencode(params)}"
+
+
+def exchange_code_for_token(code: str) -> Dict[str, Any]:
+    settings = get_discord_oauth_settings()
+    payload = urlencode(
+        {
+            "client_id": settings["client_id"],
+            "client_secret": settings["client_secret"],
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": settings["redirect_uri"],
+        }
+    ).encode("utf-8")
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    return http_json(f"{DISCORD_API_BASE}/oauth2/token", method="POST", headers=headers, data=payload)
+
+
+def fetch_discord_identity(access_token: str) -> Dict[str, Any]:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    user = http_json(f"{DISCORD_API_BASE}/users/@me", headers=headers)
+    member = http_json(f"{DISCORD_API_BASE}/users/@me/guilds/{CCAC_MAIN_GUILD_ID}/member", headers=headers)
+    return {"user": user, "member": member}
+
+
+def clear_auth_query_params():
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+
+
+def ensure_discord_auth() -> Dict[str, Any]:
+    if "discord_auth" not in st.session_state:
+        st.session_state.discord_auth = None
+    if "discord_oauth_state" not in st.session_state:
+        st.session_state.discord_oauth_state = secrets.token_urlsafe(24)
+
+    settings = get_discord_oauth_settings()
+    if not settings["client_id"] or not settings["client_secret"] or not settings["redirect_uri"]:
+        st.error("Discord OAuth is not configured. Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI.")
+        st.stop()
+
+    raw_code = st.query_params.get("code", "")
+    raw_state = st.query_params.get("state", "")
+    code = raw_code[0] if isinstance(raw_code, list) and raw_code else str(raw_code or "")
+    state = raw_state[0] if isinstance(raw_state, list) and raw_state else str(raw_state or "")
+
+    if code and not st.session_state.discord_auth:
+        if state != st.session_state.discord_oauth_state:
+            st.error("Discord login state validation failed. Please try again.")
+            st.stop()
+        try:
+            token_payload = exchange_code_for_token(code)
+            access_token = token_payload.get("access_token", "")
+            if not access_token:
+                raise ValueError(token_payload.get("error_description") or "No access token returned by Discord.")
+            identity = fetch_discord_identity(access_token)
+            user = identity.get("user", {})
+            member = identity.get("member", {})
+            role_ids = {int(role_id) for role_id in member.get("roles", [])}
+            if CCAC_STREAMLIT_ROLE_ID not in role_ids:
+                raise PermissionError("Your Discord account does not have the required CCAC Streamlit access role.")
+            st.session_state.discord_auth = {
+                "access_token": access_token,
+                "user": user,
+                "member": member,
+            }
+            st.session_state.discord_oauth_state = secrets.token_urlsafe(24)
+            clear_auth_query_params()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Discord login failed: {e}")
+            st.stop()
+
+    if st.session_state.discord_auth:
+        return st.session_state.discord_auth
+
+    st.sidebar.write("🔐 Staff sign-in")
+    st.sidebar.caption("Sign in with Discord. Access is limited to members with the required CCAC role.")
+    st.sidebar.link_button("Sign in with Discord", build_discord_login_url(st.session_state.discord_oauth_state))
+    st.stop()
 
 
 def find_dir(candidates: List[str]) -> Path:
@@ -469,7 +588,12 @@ def query_mysql_transcripts_map() -> Dict[str, Dict[str, Any]]:
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
-            "SELECT channel_id, transcript_json FROM ticket_transcripts ORDER BY updated_at DESC LIMIT 2000"
+            """
+            SELECT channel_id, owner_id, owner_name, opened_by, closed_by, opened_at, closed_at, transcript_json
+            FROM ticket_transcripts
+            ORDER BY updated_at DESC
+            LIMIT 2000
+            """
         )
         rows = cursor.fetchall()
         cursor.close()
@@ -484,6 +608,14 @@ def query_mysql_transcripts_map() -> Dict[str, Dict[str, Any]]:
             try:
                 parsed = json.loads(payload)
                 if isinstance(parsed, dict):
+                    ticket = parsed.setdefault("ticket", {})
+                    if isinstance(ticket, dict):
+                        ticket.setdefault("owner_id", row.get("owner_id"))
+                        ticket.setdefault("owner_name", row.get("owner_name"))
+                        ticket.setdefault("opened_by", row.get("opened_by"))
+                        ticket.setdefault("closed_by", row.get("closed_by"))
+                        ticket.setdefault("opened_at", row.get("opened_at"))
+                        ticket.setdefault("closed_at", row.get("closed_at"))
                     result[channel_id] = parsed
             except Exception:
                 continue
@@ -511,6 +643,99 @@ def normalize_query_value(value: Any) -> str:
     if isinstance(value, list):
         return value[0] if value else ""
     return value or ""
+
+
+def canonical_staff_names(user: Dict[str, Any]) -> List[str]:
+    values = [
+        str(user.get("username", "") or ""),
+        str(user.get("global_name", "") or ""),
+    ]
+    discriminator = str(user.get("discriminator", "") or "")
+    username = str(user.get("username", "") or "")
+    if username and discriminator and discriminator != "0":
+        values.append(f"{username}#{discriminator}")
+    return [value.strip() for value in values if value and value.strip()]
+
+
+def name_matches_staff(name: Any, possible_names: List[str]) -> bool:
+    normalized = str(name or "").strip().lower()
+    if not normalized:
+        return False
+    for candidate in possible_names:
+        cand = candidate.strip().lower()
+        if not cand:
+            continue
+        if normalized == cand or normalized.startswith(f"{cand}#") or cand in normalized:
+            return True
+    return False
+
+
+def classify_message_kind(msg: Dict[str, Any], normalized_content: str, internal_markers: List[str], staff_identifiers: List[str]) -> str:
+    if message_is_internal(msg, normalized_content, internal_markers):
+        return "internal"
+
+    role = str(msg.get("role", "")).lower()
+    if role == "user":
+        return "user"
+    if role == "staff" or is_staff_response_message(msg, normalized_content) or is_staff(str(msg.get("author", "")), staff_identifiers):
+        return "staff"
+    return "internal"
+
+
+def filter_messages_by_kind(messages: List[Dict[str, Any]], internal_markers: List[str], staff_identifiers: List[str], allowed_kinds: set) -> List[Dict[str, Any]]:
+    filtered = []
+    for msg in messages:
+        _author, content = normalize_display_message(msg)
+        if classify_message_kind(msg, content, internal_markers, staff_identifiers) in allowed_kinds:
+            filtered.append(msg)
+    return filtered
+
+
+def compute_staff_overview_metrics(tickets: List[Dict[str, Any]], db_transcripts_map: Dict[str, Dict[str, Any]], discord_auth: Dict[str, Any]) -> Dict[str, int]:
+    user = discord_auth.get("user", {})
+    user_id = int(user.get("id", 0) or 0)
+    possible_names = canonical_staff_names(user)
+
+    assigned_open = 0
+    assigned_closed = 0
+    closed_by_staff = 0
+    staff_replies = 0
+    handled_channels = set()
+
+    for ticket in tickets:
+        mod_username = ticket.get("mod_username")
+        if name_matches_staff(mod_username, possible_names):
+            if str(ticket.get("status", "")).lower() == "open":
+                assigned_open += 1
+            else:
+                assigned_closed += 1
+
+    for channel_id, transcript_payload in db_transcripts_map.items():
+        if not isinstance(transcript_payload, dict):
+            continue
+        ticket = transcript_payload.get("ticket", {}) if isinstance(transcript_payload.get("ticket", {}), dict) else {}
+        messages = transcript_payload.get("messages", []) if isinstance(transcript_payload.get("messages", []), list) else []
+
+        closed_by = ticket.get("closed_by") or transcript_payload.get("closed_by")
+        if name_matches_staff(closed_by, possible_names):
+            closed_by_staff += 1
+            handled_channels.add(channel_id)
+
+        for msg in messages:
+            author_id = int(msg.get("author_id", 0) or 0)
+            author_name = str(msg.get("author", "") or "")
+            role = str(msg.get("role", "")).lower()
+            if role == "staff" and (author_id == user_id or name_matches_staff(author_name, possible_names)):
+                staff_replies += 1
+                handled_channels.add(channel_id)
+
+    return {
+        "assigned_open": assigned_open,
+        "assigned_closed": assigned_closed,
+        "closed_by_you": closed_by_staff,
+        "staff_replies": staff_replies,
+        "handled_tickets": len(handled_channels),
+    }
 
 
 def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path], db_transcripts_map: Dict[str, Dict[str, Any]]):
@@ -611,7 +836,43 @@ def render_transcript_view(
         category = ticket.get("category") or "Transcript"
         st.markdown(f"## {category}")
         st.write(f"Messages: **{len(messages)}**")
-        render_messages_appy_style(messages, image_root, staff_identifiers, show_internal, internal_markers)
+        conversation_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"user", "staff"})
+        user_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"user"})
+        staff_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"staff"})
+        internal_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"internal"})
+
+        tab_conversation, tab_user, tab_staff, tab_internal = st.tabs(
+            [
+                f"Conversation ({len(conversation_messages)})",
+                f"User Responses ({len(user_messages)})",
+                f"Staff Replies ({len(staff_messages)})",
+                f"Internal ({len(internal_messages)})",
+            ]
+        )
+
+        with tab_conversation:
+            if conversation_messages:
+                render_messages_appy_style(conversation_messages, image_root, staff_identifiers, False, internal_markers)
+            else:
+                st.info("No user/staff conversation messages found.")
+
+        with tab_user:
+            if user_messages:
+                render_messages_appy_style(user_messages, image_root, staff_identifiers, False, internal_markers)
+            else:
+                st.info("No user responses found.")
+
+        with tab_staff:
+            if staff_messages:
+                render_messages_appy_style(staff_messages, image_root, staff_identifiers, False, internal_markers)
+            else:
+                st.info("No staff replies found.")
+
+        with tab_internal:
+            if internal_messages:
+                render_messages_appy_style(internal_messages, image_root, staff_identifiers, True, internal_markers)
+            else:
+                st.info("No internal messages found.")
 
 
 def query_custom_url(url: str):
@@ -639,31 +900,16 @@ def query_custom_url(url: str):
 def main():
     st.set_page_config(page_title="Transcript Viewer", layout="wide")
     st.title("📋 Transcript Viewer")
+    discord_auth = ensure_discord_auth()
+    discord_user = discord_auth.get("user", {})
 
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
-
-    pwd_env = os.getenv("STREAMLIT_STAFF_PASSWORD")
-    try:
-        pwd_secret = st.secrets.get("staff_password") if hasattr(st, "secrets") else None
-    except Exception:
-        pwd_secret = None
-    staff_password = pwd_env or pwd_secret
-
-    if not st.session_state.authenticated:
-        with st.sidebar.form("login"):
-            st.write("🔐 Staff sign-in")
-            pwd = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Sign in")
-            if submitted:
-                if staff_password and pwd == staff_password:
-                    st.session_state.authenticated = True
-                    st.rerun()
-                else:
-                    st.error("Invalid password. Set STREAMLIT_STAFF_PASSWORD or staff_password in secrets.")
-        st.stop()
-
-    st.sidebar.success("✅ Authenticated")
+    display_name = discord_user.get("global_name") or discord_user.get("username") or "Unknown user"
+    st.sidebar.success(f"✅ Signed in as {display_name}")
+    st.sidebar.caption(f"Guild: {CCAC_MAIN_GUILD_ID} · Required role: {CCAC_STREAMLIT_ROLE_ID}")
+    if st.sidebar.button("Sign out"):
+        st.session_state.discord_auth = None
+        st.session_state.discord_oauth_state = secrets.token_urlsafe(24)
+        st.rerun()
 
     query_section = normalize_query_value(st.query_params.get("section", ""))
     query_channel = normalize_query_value(st.query_params.get("channel", ""))
@@ -703,10 +949,18 @@ def main():
         st.subheader("Overview")
         open_count = sum(1 for t in tickets if str(t.get("status", "")).lower() == "open")
         closed_count = sum(1 for t in tickets if str(t.get("status", "")).lower() == "closed")
+        metrics = compute_staff_overview_metrics(tickets, db_transcripts_map, discord_auth)
+        st.caption(f"Personal metrics for {display_name}")
         c1, c2, c3 = st.columns(3)
         c1.metric("Open tickets", open_count)
         c2.metric("Closed tickets", closed_count)
         c3.metric("Transcripts", len(set(list(transcript_map.keys()) + list(db_transcripts_map.keys()))))
+        c4, c5, c6, c7, c8 = st.columns(5)
+        c4.metric("Your open tickets", metrics["assigned_open"])
+        c5.metric("Your closed tickets", metrics["closed_by_you"])
+        c6.metric("Your assigned closed", metrics["assigned_closed"])
+        c7.metric("Your staff replies", metrics["staff_replies"])
+        c8.metric("Tickets you handled", metrics["handled_tickets"])
         st.write("Use **Logs** to browse ticket status and open transcript links.")
         st.write("Use **Transcript View** to read full conversation history.")
 
