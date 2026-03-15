@@ -124,7 +124,11 @@ def get_staff_position(member: discord.Member):
 
 def staff_or_manage_channels():
     async def predicate(ctx: commands.Context):
-        allowed = {JUNIOR_MOD_ROLE_ID, ADDITIONAL_STAFF_ROLE_ID}
+        allowed = {role_id for role_id in STAFF_ROLES.keys() if role_id}
+        if JUNIOR_MOD_ROLE_ID:
+            allowed.add(JUNIOR_MOD_ROLE_ID)
+        if ADDITIONAL_STAFF_ROLE_ID:
+            allowed.add(ADDITIONAL_STAFF_ROLE_ID)
         if any(r.id in allowed for r in ctx.author.roles):
             return True
         return ctx.author.guild_permissions.manage_channels
@@ -159,11 +163,22 @@ class StaffCommands(commands.Cog):
                 return self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
         return None
 
+    def extract_ccac_msg_id(self, message: discord.Message) -> int:
+        if not message.embeds:
+            raise ValueError("Referenced message does not contain an embed.")
+        footer = message.embeds[0].footer.text or ""
+        match = re.search(r"CCACMsgCode:(\d+)", footer)
+        if not match:
+            match = re.search(r"(?:\|\s*)?(\d{17,20})\s*$", footer)
+        if not match:
+            raise ValueError("Referenced message does not contain a valid CCACMsgCode or legacy message ID.")
+        return int(match.group(1))
+
     async def check_junior_mod(self, ctx):
         if ctx.author.bot:
             return False
         role_ids = [role.id for role in ctx.author.roles]
-        return JUNIOR_MOD_ROLE_ID in role_ids
+        return JUNIOR_MOD_ROLE_ID in role_ids or any(role_id in STAFF_ROLES for role_id in role_ids)
 
     # ------------------ DX Premade Responses ------------------
 
@@ -312,10 +327,10 @@ class StaffCommands(commands.Cog):
                 await ctx.send(embed=self.build_embed("Error", "You must reply to the old bot message containing the CCACMsgCode.", discord.Color.red()))
                 return
             replied_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
-            msg_id = replied_msg.embeds[0].footer.text.replace("CCACMsgCode:", "").split("|")[-1].strip()
+            msg_id = self.extract_ccac_msg_id(replied_msg)
             user = await self.get_user_from_channel(ctx.channel)
             dm_channel = await user.create_dm()
-            target_msg = await dm_channel.fetch_message(int(msg_id))
+            target_msg = await dm_channel.fetch_message(msg_id)
             old_embed = target_msg.embeds[0]
 
             image_url = old_embed.image.url if old_embed.image else None
@@ -360,10 +375,10 @@ class StaffCommands(commands.Cog):
                 await ctx.send(embed=self.build_embed("Error", "You must reply to the staff confirmation message containing CCACMsgCode.", discord.Color.red()))
                 return
             replied_msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
-            msg_id = replied_msg.embeds[0].footer.text.replace("CCACMsgCode:", "").strip()
+            msg_id = self.extract_ccac_msg_id(replied_msg)
             user = await self.get_user_from_channel(ctx.channel)
             dm_channel = await user.create_dm()
-            target_msg = await dm_channel.fetch_message(int(msg_id))
+            target_msg = await dm_channel.fetch_message(msg_id)
             await target_msg.delete()
             await replied_msg.delete()
             await ctx.message.delete()
