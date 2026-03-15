@@ -21,6 +21,7 @@ logger = logging.getLogger("modmail.db")
 class DatabaseManager:
     def __init__(self, bot):
         self.bot = bot
+        self._user_notes_ready = False
         self.conn = mysql.connector.connect(
             host=DB_CONFIG["host"],
             port=DB_CONFIG["port"],
@@ -28,15 +29,52 @@ class DatabaseManager:
             password=DB_CONFIG["password"],
             database=DB_CONFIG["database"]
         )
-        self.cursor = self.conn.cursor(dictionary=True)
+
+    def _new_cursor(self):
+        return self.conn.cursor(dictionary=True, buffered=True)
+
+    def _execute(self, query: str, params=None, *, commit: bool = False):
+        cursor = self._new_cursor()
+        try:
+            if params is None:
+                cursor.execute(query)
+            else:
+                cursor.execute(query, params)
+            if commit:
+                self.conn.commit()
+        finally:
+            cursor.close()
+
+    def _fetchone(self, query: str, params=None):
+        cursor = self._new_cursor()
+        try:
+            if params is None:
+                cursor.execute(query)
+            else:
+                cursor.execute(query, params)
+            return cursor.fetchone()
+        finally:
+            cursor.close()
+
+    def _fetchall(self, query: str, params=None):
+        cursor = self._new_cursor()
+        try:
+            if params is None:
+                cursor.execute(query)
+            else:
+                cursor.execute(query, params)
+            return cursor.fetchall()
+        finally:
+            cursor.close()
 
     def setup(self):
         self._ensure_single_open_ticket_constraint()
         self._ensure_transcript_table()
+        self._ensure_user_notes_table()
         logger.info("Database connection established.")
 
     def _ensure_transcript_table(self):
-        self.cursor.execute(
+        self._execute(
             """
             CREATE TABLE IF NOT EXISTS ticket_transcripts (
                 id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -58,9 +96,25 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
-            """
+            """,
+            commit=True,
         )
-        self.conn.commit()
+
+    def _ensure_user_notes_table(self):
+        self._execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_notes (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                note LONGTEXT NOT NULL,
+                staff VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_user_notes_user_id_created_at (user_id, created_at)
+            )
+            """,
+            commit=True,
+        )
+        self._user_notes_ready = True
 
     def _parse_iso_datetime(self, value):
         if not value or not isinstance(value, str):
@@ -92,7 +146,7 @@ class DatabaseManager:
 
         transcript_json = json.dumps(transcript_data, ensure_ascii=False)
 
-        self.cursor.execute(
+        self._execute(
             """
             INSERT INTO ticket_transcripts (
                 channel_id, guild_id, guild_name, channel_name, category_name,
@@ -133,36 +187,36 @@ class DatabaseManager:
                 close_reason,
                 len(messages),
                 transcript_json,
-            )
+            ),
+            commit=True,
         )
-        self.conn.commit()
         return True
 
     def _ensure_single_open_ticket_constraint(self):
         try:
-            self.cursor.execute(
+            self._execute(
                 """
                 ALTER TABLE active_tickets
                 ADD COLUMN open_ticket_user_id BIGINT
                 GENERATED ALWAYS AS (
                     CASE WHEN status = 'open' THEN user_id ELSE NULL END
                 ) STORED
-                """
+                """,
+                commit=True,
             )
-            self.conn.commit()
             logger.info("Added generated column open_ticket_user_id to active_tickets.")
         except mysql.connector.Error as err:
             if err.errno != errorcode.ER_DUP_FIELDNAME:
                 logger.warning(f"Could not add generated column open_ticket_user_id: {err}")
 
         try:
-            self.cursor.execute(
+            self._execute(
                 """
                 CREATE UNIQUE INDEX uq_active_tickets_one_open_per_user
                 ON active_tickets (open_ticket_user_id)
-                """
+                """,
+                commit=True,
             )
-            self.conn.commit()
             logger.info("Created unique index uq_active_tickets_one_open_per_user.")
         except mysql.connector.Error as err:
             if err.errno == errorcode.ER_DUP_ENTRY:
@@ -175,16 +229,15 @@ class DatabaseManager:
 
     def get_open_ticket_channel_id(self, user_id: int, category_id: int = None):
         if category_id:
-            self.cursor.execute(
-                "SELECT channel_id FROM active_tickets WHERE user_id=%s AND category_id=%s AND status='open'",
+            result = self._fetchone(
+                "SELECT channel_id FROM active_tickets WHERE user_id=%s AND category_id=%s AND status='open' LIMIT 1",
                 (user_id, category_id)
             )
         else:
-            self.cursor.execute(
-                "SELECT channel_id FROM active_tickets WHERE user_id=%s AND status='open'",
+            result = self._fetchone(
+                "SELECT channel_id FROM active_tickets WHERE user_id=%s AND status='open' LIMIT 1",
                 (user_id,)
             )
-        result = self.cursor.fetchone()
         return int(result["channel_id"]) if result else None
 
     def create_ticket_entry(self, user, channel, category_id, ticket_type: str):
@@ -193,7 +246,7 @@ class DatabaseManager:
             return False
 
         try:
-            self.cursor.execute(
+            self._execute(
                 """
                 INSERT INTO active_tickets 
                 (channel_id, user_id, member_username, mod_username, category_id, channel_name, created_at, closed_at, status, ticket_type, mod_id)
@@ -209,9 +262,9 @@ class DatabaseManager:
                     "open",
                     ticket_type,
                     None
-                )
+                ),
+                commit=True,
             )
-            self.conn.commit()
             return True
         except mysql.connector.Error as err:
             if err.errno == errorcode.ER_DUP_ENTRY:
@@ -219,142 +272,162 @@ class DatabaseManager:
             raise
 
     def close_ticket_by_user(self, user_id: int):
-        self.cursor.execute(
+        self._execute(
             """
             UPDATE active_tickets 
             SET status='closed', closed_at=NOW() 
             WHERE user_id=%s AND status='open'
             """,
-            (user_id,)
+            (user_id,),
+            commit=True,
         )
-        self.conn.commit()
 
     def assign_mod_to_ticket(self, channel_id: int, mod_id: int, mod_username: str):
-        self.cursor.execute(
+        self._execute(
             """
             UPDATE active_tickets
             SET mod_id = %s, mod_username = %s
             WHERE channel_id = %s AND status = 'open'
             """,
-            (mod_id, mod_username, channel_id)
+            (mod_id, mod_username, channel_id),
+            commit=True,
         )
-        self.conn.commit()
+
     def get_active_tickets(self):
         """Return all open tickets from the database."""
-        self.cursor.execute("SELECT * FROM active_tickets WHERE status = 'open'")
-        return self.cursor.fetchall()
+        return self._fetchall("SELECT * FROM active_tickets WHERE status = 'open'")
 
     def update_ticket_notified(self, channel_id: int):
         """Mark ticket as notified (after 48-hour reminder sent)."""
         # Add this column in your table if it doesn't exist yet:
         # ALTER TABLE active_tickets ADD COLUMN notified TINYINT(1) DEFAULT 0;
-        self.cursor.execute(
+        self._execute(
             "UPDATE active_tickets SET notified = 1 WHERE channel_id = %s",
-            (channel_id,)
+            (channel_id,),
+            commit=True,
         )
-        self.conn.commit()
 
     def get_ticket_by_channel(self, channel_id: int):
-        self.cursor.execute(
-            "SELECT * FROM active_tickets WHERE channel_id=%s AND status='open'",
+        return self._fetchone(
+            "SELECT * FROM active_tickets WHERE channel_id=%s AND status='open' LIMIT 1",
             (channel_id,)
         )
-        return self.cursor.fetchone()
 
     def close_ticket(self, channel_id: int, closed_at: datetime):
-        self.cursor.execute(
+        self._execute(
             """
             UPDATE active_tickets
             SET status = 'closed',
                 closed_at = %s
             WHERE channel_id = %s
             """,
-            (closed_at, channel_id)
+            (closed_at, channel_id),
+            commit=True,
         )
-        self.conn.commit()
 
     def get_dx_response(self, key: str):
-        self.cursor.execute("SELECT response FROM dx_responses WHERE `key`=%s", (key,))
-        row = self.cursor.fetchone()
+        row = self._fetchone("SELECT response FROM dx_responses WHERE `key`=%s LIMIT 1", (key,))
         if row:
             return row["response"]
         return None
 
     def add_dx_response(self, key: str, response: str):
-        self.cursor.execute(
-            "INSERT INTO dx_responses (`key`, `response`) VALUES (%s, %s)", (key, response)
+        self._execute(
+            "INSERT INTO dx_responses (`key`, `response`) VALUES (%s, %s)", (key, response), commit=True
         )
-        self.conn.commit()
 
     def remove_dx_response(self, key: str):
-        self.cursor.execute("DELETE FROM dx_responses WHERE `key`=%s", (key,))
-        self.conn.commit()
+        self._execute("DELETE FROM dx_responses WHERE `key`=%s", (key,), commit=True)
 
     def get_all_dx_responses(self):
-        self.cursor.execute("SELECT `key`, response FROM dx_responses")
-        rows = self.cursor.fetchall()
+        rows = self._fetchall("SELECT `key`, response FROM dx_responses")
         return [{"key": row["key"], "response": row["response"]} for row in rows]
 
     def add_ticket_timer(self, channel_id: int, user_id: int, action: str, execute_at: datetime):
-        self.cursor.execute("""
+        self._execute("""
             INSERT INTO ticket_timers (channel_id, user_id, action, execute_at)
             VALUES (%s, %s, %s, %s)
-        """, (channel_id, user_id, action, execute_at))
-        self.conn.commit()
+        """, (channel_id, user_id, action, execute_at), commit=True)
 
     def cancel_ticket_timer(self, channel_id: int, action: str):
-        self.cursor.execute("""
+        self._execute("""
             DELETE FROM ticket_timers
             WHERE channel_id=%s AND action=%s
-        """, (channel_id, action))
-        self.conn.commit()
+        """, (channel_id, action), commit=True)
 
     # database_manager.py
     def get_pending_timers(self):
-        self.cursor.execute("SELECT * FROM ticket_timers WHERE status='pending'")
-        return self.cursor.fetchall()
+        return self._fetchall("SELECT * FROM ticket_timers WHERE status='pending'")
 
 
 
     def add_watcher(self, channel_id: int, mod_id: int):
-        self.cursor.execute("""
+        self._execute("""
             INSERT IGNORE INTO ticket_watchers (channel_id, mod_id)
             VALUES (%s, %s)
-        """, (channel_id, mod_id))
-        self.conn.commit()
+        """, (channel_id, mod_id), commit=True)
 
     def get_watchers(self, channel_id: int):
-        self.cursor.execute("SELECT mod_id FROM ticket_watchers WHERE channel_id=%s", (channel_id,))
-        rows = self.cursor.fetchall()
+        rows = self._fetchall("SELECT mod_id FROM ticket_watchers WHERE channel_id=%s", (channel_id,))
         return [r["mod_id"] for r in rows]
 
     def remove_watcher(self, channel_id: int, mod_id: int):
-        self.cursor.execute(
+        self._execute(
             "DELETE FROM ticket_watchers WHERE channel_id=%s AND mod_id=%s",
-            (channel_id, mod_id)
+            (channel_id, mod_id),
+            commit=True,
         )
-        self.conn.commit()
 
     def add_note(self, user_id: int, note: str, staff: str):
         """Add a note for a user."""
-        self.cursor.execute(
-            """
-            INSERT INTO user_notes (user_id, note, staff, created_at)
-            VALUES (%s, %s, %s, NOW())
-            """,
-            (user_id, note, staff)
-        )
-        self.conn.commit()
+        if not self._user_notes_ready:
+            self._ensure_user_notes_table()
+        try:
+            self._execute(
+                """
+                INSERT INTO user_notes (user_id, note, staff, created_at)
+                VALUES (%s, %s, %s, NOW())
+                """,
+                (user_id, note, staff),
+                commit=True,
+            )
+        except mysql.connector.Error as err:
+            if err.errno != errorcode.ER_NO_SUCH_TABLE:
+                raise
+            self._ensure_user_notes_table()
+            self._execute(
+                """
+                INSERT INTO user_notes (user_id, note, staff, created_at)
+                VALUES (%s, %s, %s, NOW())
+                """,
+                (user_id, note, staff),
+                commit=True,
+            )
 
     def get_notes(self, user_id: int):
         """Retrieve all notes for a user, ordered by creation time."""
-        self.cursor.execute(
-            """
-            SELECT id, user_id, note, staff, created_at
-            FROM user_notes
-            WHERE user_id = %s
-            ORDER BY created_at DESC
-            """,
-            (user_id,)
-        )
-        return self.cursor.fetchall()
+        if not self._user_notes_ready:
+            self._ensure_user_notes_table()
+        try:
+            return self._fetchall(
+                """
+                SELECT id, user_id, note, staff, created_at
+                FROM user_notes
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                """,
+                (user_id,)
+            )
+        except mysql.connector.Error as err:
+            if err.errno != errorcode.ER_NO_SUCH_TABLE:
+                raise
+            self._ensure_user_notes_table()
+            return self._fetchall(
+                """
+                SELECT id, user_id, note, staff, created_at
+                FROM user_notes
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                """,
+                (user_id,)
+            )

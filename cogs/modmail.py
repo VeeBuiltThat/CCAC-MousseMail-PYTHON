@@ -506,7 +506,7 @@ class Modmail(commands.Cog):
         db_saved = await self._try_db_add_ticket_timer(ctx.channel.id, user_id, "close", execute_at_dt)
 
         if db_saved:
-            desc = f"⏲️ Ticket will close at {self._format_dt_for_db(execute_at_dt)} UTC unless canceled with `!cancelclose`."
+            desc = f"⏲️ Ticket will close at {self._format_dt_for_db(execute_at_dt)} UTC unless canceled with `%cancelclose`."
             await ctx.send(embed=discord.Embed(description=desc, color=discord.Color.orange(), timestamp=datetime.now(timezone.utc)))
             return
 
@@ -519,8 +519,7 @@ class Modmail(commands.Cog):
 
         hours = delay_seconds // 3600
         minutes = (delay_seconds % 3600) // 60
-        desc = f"⏲️ Ticket will close in {hours}h {minutes}m unless canceled with `!cancelclose`."
-        await ctx.send(embed=discord.Embed(description=desc, color=discord.Color.orange(), timestamp=datetime.now(timezone.utc)))
+        desc = f"⏲️ Ticket will close in {hours}h {minutes}m unless canceled with `%cancelclose`."
         await ctx.send(embed=discord.Embed(description=desc, color=discord.Color.orange(), timestamp=datetime.now(timezone.utc)))
 
     async def _delayed_close_channel(self, channel: discord.TextChannel, delay: int, scheduled_by: discord.Member = None):

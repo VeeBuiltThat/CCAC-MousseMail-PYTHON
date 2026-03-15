@@ -23,6 +23,7 @@ TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")
 LOG_DIR = getattr(app_config, "LOG_DIR", "logs")
 TICKET_REMINDER_HOURS = getattr(app_config, "TICKET_REMINDER_HOURS", 48)
 BOT_TOKEN = getattr(app_config, "BOT_TOKEN", None) or getattr(app_config, "DISCORD_TOKEN", None)
+ERROR_CHANNEL_ID = getattr(app_config, "ERROR_CHANNEL_ID", 1482074428606255154)
 
 BOT_BUILD_MARKER = getattr(app_config, "BOT_BUILD_MARKER", "2026-03-04T14:58Z-note-fix-v3")
 
@@ -58,6 +59,150 @@ def resolve_bot_token(config_manager=None):
     return None
 
 
+HELP_COMMAND_OVERRIDES = {
+    "r": {
+        "summary": "Reply to the user tied to the current ticket.",
+        "usage": "%r <message>",
+        "example": "%r Thanks for the report. We're reviewing it now.",
+        "group": "Messaging",
+    },
+    "re": {
+        "summary": "Edit a previously sent staff reply by replying to the staff confirmation message.",
+        "usage": "%re <new message>",
+        "example": "%re Small update: this has now been resolved.",
+        "group": "Messaging",
+    },
+    "anon": {
+        "summary": "Send a reply without showing your staff identity.",
+        "usage": "%anon <message>",
+        "example": "%anon Please send the missing screenshot when ready.",
+        "group": "Messaging",
+    },
+    "delete": {
+        "summary": "Delete a DM previously sent to the user by replying to the matching staff log message.",
+        "usage": "%delete",
+        "example": "%delete",
+        "group": "Messaging",
+    },
+    "dx": {
+        "summary": "List all saved premade response keys.",
+        "usage": "%dx",
+        "example": "%dx",
+        "group": "Messaging",
+    },
+    "dxadd": {
+        "summary": "Save a new premade response under a key.",
+        "usage": "%dxadd <key> <response>",
+        "example": "%dxadd greet Hello, thanks for reaching out.",
+        "group": "Messaging",
+    },
+    "msg": {
+        "summary": "Preview a saved premade response in the current ticket.",
+        "usage": "%msg <key>",
+        "example": "%msg greet",
+        "group": "Messaging",
+    },
+    "close": {
+        "summary": "Close the current ticket immediately or after a delay.",
+        "usage": "%close [time]",
+        "example": "%close 1h30m",
+        "group": "Ticket Flow",
+    },
+    "cancelclose": {
+        "summary": "Cancel a scheduled ticket close.",
+        "usage": "%cancelclose",
+        "example": "%cancelclose",
+        "group": "Ticket Flow",
+    },
+    "suspend": {
+        "summary": "Suspend the current ticket and auto-close it after 24 hours if the user stays inactive.",
+        "usage": "%suspend",
+        "example": "%suspend",
+        "group": "Ticket Flow",
+    },
+    "move": {
+        "summary": "Move the current ticket to another configured category.",
+        "usage": "%move <category>",
+        "example": "%move reports",
+        "group": "Ticket Flow",
+    },
+    "transfer": {
+        "summary": "Transfer ownership of the current ticket to another staff member.",
+        "usage": "%transfer <@staff>",
+        "example": "%transfer @Moderator",
+        "group": "Ticket Flow",
+    },
+    "contact": {
+        "summary": "Open a new outbound contact ticket for a user.",
+        "usage": "%contact <user_id> [reason]",
+        "example": "%contact 123456789012345678 Follow-up on your application",
+        "group": "Ticket Flow",
+    },
+    "notifyme": {
+        "summary": "Subscribe yourself to user reply notifications for this ticket.",
+        "usage": "%notifyme",
+        "example": "%notifyme",
+        "group": "Ticket Flow",
+    },
+    "transcript": {
+        "summary": "Save or review ticket transcripts.",
+        "usage": "%transcript [user_id]",
+        "example": "%transcript 123456789012345678",
+        "group": "Ticket Flow",
+    },
+    "note": {
+        "summary": "Attach an internal note to the user tied to the current ticket.",
+        "usage": "%note <message>",
+        "example": "%note User was cooperative and provided proof quickly.",
+        "group": "Staff Tools",
+    },
+    "trs": {
+        "summary": "Review a user's stored transcripts and internal notes.",
+        "usage": "%trs <user_id>",
+        "example": "%trs 123456789012345678",
+        "group": "Staff Tools",
+    },
+    "remindme": {
+        "summary": "Send yourself a reminder after a delay.",
+        "usage": "%remindme <about> <when>",
+        "example": "%remindme check screenshots 2h",
+        "group": "Staff Tools",
+    },
+    "raw": {
+        "summary": "Show the raw user ID for the current ticket.",
+        "usage": "%raw",
+        "example": "%raw",
+        "group": "Staff Tools",
+    },
+    "language": {
+        "summary": "Placeholder for translation tooling.",
+        "usage": "%language <code> [text]",
+        "example": "%language nl Hello there",
+        "group": "Staff Tools",
+    },
+    "stats": {
+        "summary": "Show ticket activity stats for authorized staff.",
+        "usage": "%stats",
+        "example": "%stats",
+        "group": "Staff Tools",
+    },
+    "create": {
+        "summary": "Create a new Discord category if you have the required role or permission.",
+        "usage": "%create <category name>",
+        "example": "%create Event Queue",
+        "group": "Admin",
+    },
+    "help": {
+        "summary": "Show the command guide or inspect a single command.",
+        "usage": "%help [command]",
+        "example": "%help close",
+        "group": "General",
+    },
+}
+
+HELP_CATEGORY_ORDER = ["General", "Messaging", "Ticket Flow", "Staff Tools", "Admin", "Other"]
+
+
 class ModmailBot(commands.Bot):
     def __init__(self):
         self.config = ConfigManager(self)
@@ -71,7 +216,7 @@ class ModmailBot(commands.Bot):
         intents.dm_messages = True
         intents.message_content = True
 
-        super().__init__(command_prefix="%", intents=intents)
+        super().__init__(command_prefix="%", intents=intents, help_command=None)
 
         self.session = None
         self.loaded_cogs = [
@@ -89,6 +234,115 @@ class ModmailBot(commands.Bot):
 
         self.log_file_path = os.path.join(TEMP_DIR, LOG_DIR, "modmail.log")
         configure_logging()
+        self.add_command(self._build_help_command())
+
+    def _command_meta(self, command: commands.Command):
+        return HELP_COMMAND_OVERRIDES.get(command.name, {})
+
+    def _command_summary(self, command: commands.Command):
+        meta = self._command_meta(command)
+        summary = meta.get("summary") or command.short_doc or command.help or "No description available."
+        return summary.splitlines()[0].strip()
+
+    def _command_group(self, command: commands.Command):
+        meta = self._command_meta(command)
+        cog_name = getattr(command.cog, "qualified_name", None)
+        return meta.get("group") or cog_name or "Other"
+
+    def _build_help_embed(self, title: str, description: str, color: discord.Color):
+        embed = discord.Embed(
+            title=title,
+            description=description,
+            color=color,
+            timestamp=discord.utils.utcnow()
+        )
+        embed.set_footer(text="Use %help <command> for details.")
+        return embed
+
+    async def _send_help_overview(self, ctx: commands.Context):
+        commands_list = sorted(self.commands, key=lambda command: command.name)
+        grouped_commands = {group_name: [] for group_name in HELP_CATEGORY_ORDER}
+
+        for command in commands_list:
+            if command.hidden:
+                continue
+            group_name = self._command_group(command)
+            if group_name not in grouped_commands:
+                grouped_commands[group_name] = []
+            grouped_commands[group_name].append(command)
+
+        embed = self._build_help_embed(
+            title="Help Center",
+            description="A quick reference for staff commands.",
+            color=discord.Color.blurple()
+        )
+
+        ordered_groups = HELP_CATEGORY_ORDER + [name for name in grouped_commands if name not in HELP_CATEGORY_ORDER]
+        for group_name in ordered_groups:
+            group_commands = grouped_commands.get(group_name, [])
+            if not group_commands:
+                continue
+
+            lines = []
+            current_length = 0
+            for command in group_commands:
+                line = f"`%{command.name}` - {self._command_summary(command)}"
+                if current_length + len(line) + 1 > 1024:
+                    break
+                lines.append(line)
+                current_length += len(line) + 1
+
+            embed.add_field(name=group_name, value="\n".join(lines), inline=False)
+
+        await ctx.send(embed=embed)
+
+    async def _send_help_for_command(self, ctx: commands.Context, command_name: str):
+        command = self.get_command(command_name)
+        if command is None or command.hidden:
+            await ctx.send(embed=self._build_help_embed(
+                title="Help Error",
+                description=f"No command named `{command_name}` was found.",
+                color=discord.Color.red()
+            ))
+            return
+
+        meta = self._command_meta(command)
+        usage = meta.get("usage") or f"%{command.qualified_name}"
+        example = meta.get("example")
+        summary = self._command_summary(command)
+
+        embed = self._build_help_embed(
+            title=f"Command: %{command.name}",
+            description=summary,
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Usage", value=f"`{usage}`", inline=False)
+        embed.add_field(name="Category", value=self._command_group(command), inline=True)
+
+        aliases = command.aliases or []
+        embed.add_field(
+            name="Aliases",
+            value=", ".join(f"`{alias}`" for alias in aliases) if aliases else "None",
+            inline=True
+        )
+
+        if example:
+            embed.add_field(name="Example", value=f"`{example}`", inline=False)
+
+        if command.help and command.help.strip() and command.help.strip() != summary:
+            embed.add_field(name="Details", value=command.help.strip()[:1024], inline=False)
+
+        await ctx.send(embed=embed)
+
+    def _build_help_command(self):
+        @commands.command(name="help")
+        async def help_command(ctx: commands.Context, *, command_name: str = None):
+            if command_name:
+                await self._send_help_for_command(ctx, command_name.strip().lower())
+                return
+            await self._send_help_overview(ctx)
+
+        return help_command
 
     async def on_ready(self):
         logger.info(f"Bot ready as {self.user} (ID: {self.user.id})")
@@ -99,25 +353,67 @@ class ModmailBot(commands.Bot):
         self.loop.create_task(self.timer_task())
         self._connected.set()
 
-    @commands.Cog.listener()
+    async def _resolve_error_channel(self):
+        if not ERROR_CHANNEL_ID:
+            return None
+        channel = self.get_channel(ERROR_CHANNEL_ID)
+        if channel is not None:
+            return channel
+        try:
+            return await self.fetch_channel(ERROR_CHANNEL_ID)
+        except Exception:
+            return None
+
+    async def _send_error_report(self, title: str, context: str, details: str):
+        channel = await self._resolve_error_channel()
+        if channel is None:
+            return
+
+        # Discord embed descriptions are capped at 4096 chars.
+        max_len = 3900
+        if not details:
+            details = "No traceback available."
+        chunks = [details[i:i + max_len] for i in range(0, len(details), max_len)]
+
+        for index, chunk in enumerate(chunks[:3], start=1):
+            suffix = f" (part {index}/{len(chunks)})" if len(chunks) > 1 else ""
+            embed = discord.Embed(
+                title=f"{title}{suffix}",
+                description=f"{context}\n\n```{chunk}```",
+                color=discord.Color.red(),
+                timestamp=discord.utils.utcnow()
+            )
+            await channel.send(embed=embed)
+
     async def on_error(self, event, *args, **kwargs):
-        """Log errors and notify dev."""
-        logger.error(f"Error in {event}: {traceback.format_exc()}")
-        # Optionally send to a designated error channel
-        error_channel_id = 1352669054346854502  # set this to your error notification channel ID
-        if error_channel_id:
-            try:
-                error_channel = self.get_channel(error_channel_id)
-                if error_channel:
-                    embed = discord.Embed(
-                        title="⚠️ Error Detected",
-                        description=f"Event: {event}\n\n```{traceback.format_exc()[:1000]}```",
-                        color=discord.Color.red(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    await error_channel.send(embed=embed)
-            except Exception:
-                pass
+        """Log unhandled event errors and notify staff error channel."""
+        err_text = traceback.format_exc()
+        logger.error(f"Error in {event}: {err_text}")
+        try:
+            await self._send_error_report("⚠️ Error Detected", f"Event: {event}", err_text)
+        except Exception:
+            pass
+
+    async def on_command_error(self, ctx, error):
+        """Report unhandled command errors to the staff error channel."""
+        if hasattr(ctx.command, "on_error"):
+            return
+        if isinstance(error, commands.CommandNotFound):
+            return
+
+        original = getattr(error, "original", error)
+        tb_text = "".join(traceback.format_exception(type(original), original, original.__traceback__))
+        logger.error("Command error in %s by %s: %s", getattr(ctx.command, "qualified_name", "unknown"), ctx.author, tb_text)
+
+        context = (
+            f"Command: {getattr(ctx.command, 'qualified_name', 'unknown')}\n"
+            f"Author: {ctx.author} ({ctx.author.id})\n"
+            f"Channel: {ctx.channel} ({ctx.channel.id})"
+        )
+        try:
+            await self._send_error_report("⚠️ Command Error", context, tb_text)
+        except Exception:
+            pass
 
     async def timer_task(self):
         """Periodic task that checks ticket timers (24h suspend closures)."""
@@ -157,9 +453,25 @@ class ModmailBot(commands.Bot):
 
                     except Exception as e:
                         logger.error(f"Error while processing timer entry {timer_entry}: {e}")
+                        try:
+                            await self._send_error_report(
+                                "⚠️ Timer Processing Error",
+                                f"Timer entry channel_id={timer_entry.get('channel_id')} action={timer_entry.get('action')}",
+                                traceback.format_exc()
+                            )
+                        except Exception:
+                            pass
 
             except Exception as e:
                 logger.error(f"Error in timer_task loop: {e}")
+                try:
+                    await self._send_error_report(
+                        "⚠️ Timer Loop Error",
+                        "Unhandled exception in timer_task loop",
+                        traceback.format_exc()
+                    )
+                except Exception:
+                    pass
 
             # Run every 5 minutes
             await asyncio.sleep(300)
