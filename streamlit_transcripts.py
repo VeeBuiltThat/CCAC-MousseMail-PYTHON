@@ -74,24 +74,19 @@ def http_json(url: str, *, method: str = "GET", headers: Dict[str, str] = None, 
         return json.loads(payload) if payload else {}
 
 
-def get_discord_oauth_settings() -> Dict[str, str]:
-    config_client_id = getattr(app_config, "DISCORD_CLIENT_ID", "") if app_config else ""
-    config_client_secret = getattr(app_config, "DISCORD_CLIENT_SECRET", "") if app_config else ""
-    config_redirect_uri = getattr(app_config, "DISCORD_REDIRECT_URI", "") if app_config else ""
+# Ensure app_config is loaded correctly
+if not app_config:
+    from config import DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI
+else:
+    DISCORD_CLIENT_ID = app_config.DISCORD_CLIENT_ID
+    DISCORD_CLIENT_SECRET = app_config.DISCORD_CLIENT_SECRET
+    DISCORD_REDIRECT_URI = app_config.DISCORD_REDIRECT_URI
 
-    client_id = str(os.getenv("DISCORD_CLIENT_ID") or get_secret_value("DISCORD_CLIENT_ID") or config_client_id or "").strip()
-    client_secret = str(os.getenv("DISCORD_CLIENT_SECRET") or get_secret_value("DISCORD_CLIENT_SECRET") or config_client_secret or "").strip()
-    redirect_uri = str(
-        os.getenv("DISCORD_REDIRECT_URI")
-        or get_secret_value("DISCORD_REDIRECT_URI")
-        or config_redirect_uri
-        or os.getenv("STREAMLIT_PUBLIC_URL", "")
-        or get_secret_value("STREAMLIT_PUBLIC_URL")
-    ).strip()
+def get_discord_oauth_settings() -> Dict[str, str]:
     return {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "redirect_uri": redirect_uri,
+        "client_id": DISCORD_CLIENT_ID,
+        "client_secret": DISCORD_CLIENT_SECRET,
+        "redirect_uri": DISCORD_REDIRECT_URI,
     }
 
 
