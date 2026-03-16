@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta, timezone
 import os
-from dotenv import load_dotenv
 import asyncio
 import discord
 from discord.ext import commands
@@ -23,7 +22,6 @@ TICKET_MESSAGES = getattr(app_config, "TICKET_MESSAGES", [])
 TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")
 LOG_DIR = getattr(app_config, "LOG_DIR", "logs")
 TICKET_REMINDER_HOURS = getattr(app_config, "TICKET_REMINDER_HOURS", 48)
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 ERROR_CHANNEL_ID = getattr(app_config, "ERROR_CHANNEL_ID", 1482074428606255154)
 
 BOT_BUILD_MARKER = getattr(app_config, "BOT_BUILD_MARKER", "2026-03-04T14:58Z-note-fix-v3")
@@ -42,10 +40,6 @@ def configure_logging():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         handlers=[logging.StreamHandler()]
     )
-
-
-def resolve_bot_token(config_manager=None):
-    return getattr(app_config, "DISCORD_TOKEN", None)
 
 
 HELP_COMMAND_OVERRIDES = {
@@ -648,9 +642,9 @@ class ModmailBot(commands.Bot):
             async with self:
                 self.session = ClientSession()
                 self.db.setup()
-                token = resolve_bot_token(self.config)
+                token = getattr(app_config, "BOT_TOKEN", None)
                 if not token:
-                    logger.error("Bot token is missing. Set BOT_TOKEN or DISCORD_TOKEN in config/env.")
+                    logger.error("Bot token is missing. Set BOT_TOKEN (or DISCORD_TOKEN) in config/env.")
                     return
                 await self.start(token)
 
