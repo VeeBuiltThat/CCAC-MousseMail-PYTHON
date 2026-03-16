@@ -23,7 +23,7 @@ TICKET_MESSAGES = getattr(app_config, "TICKET_MESSAGES", [])
 TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")
 LOG_DIR = getattr(app_config, "LOG_DIR", "logs")
 TICKET_REMINDER_HOURS = getattr(app_config, "TICKET_REMINDER_HOURS", 48)
-BOT_TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 ERROR_CHANNEL_ID = getattr(app_config, "ERROR_CHANNEL_ID", 1482074428606255154)
 
 BOT_BUILD_MARKER = getattr(app_config, "BOT_BUILD_MARKER", "2026-03-04T14:58Z-note-fix-v3")
@@ -45,19 +45,7 @@ def configure_logging():
 
 
 def resolve_bot_token(config_manager=None):
-    candidates = [
-        getattr(app_config, "BOT_TOKEN", None),
-        getattr(app_config, "DISCORD_TOKEN", None),
-    ]
-
-    for candidate in candidates:
-        if not isinstance(candidate, str):
-            continue
-        cleaned = candidate.strip().strip('"').strip("'")
-        if cleaned:
-            return cleaned
-
-    return None
+    return getattr(app_config, "DISCORD_TOKEN", None)
 
 
 HELP_COMMAND_OVERRIDES = {
