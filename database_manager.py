@@ -12,7 +12,7 @@ except Exception:
         "host": os.getenv("DB_HOST", "gameswaw5.bisecthosting.com"),
         "port": int(os.getenv("DB_PORT", "3306")),
         "user": os.getenv("DB_USER", "u1079393_bwVUJntzFf"),
-        "password": os.getenv("DB_PASS", ""),
+        "password": os.getenv("DB_PASS", "XzaXNWotYim7AWlIeudHjSoO"),
         "database": os.getenv("DB_NAME", "s1079393_ModMail"),
     }
 
