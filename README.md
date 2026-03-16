@@ -1,7 +1,6 @@
 # ModMail Bot
 A lightweight Discord mod-mail / ticketing bot that lets users open private ticket channels by messaging the bot. Designed for small to medium servers where staff need a clear, private way to handle user inquiries.
 
-
 ## Table of contents
 - Overview
 - Features
@@ -16,6 +15,7 @@ A lightweight Discord mod-mail / ticketing bot that lets users open private tick
 - Contributing
 - License
 - Contact
+- Changelog
 
 ## Overview
 Users can DM the bot to open a private ticket channel inside a configured category. Staff can reply, move tickets between categories, and use premade replies.
@@ -27,6 +27,7 @@ Users can DM the bot to open a private ticket channel inside a configured catego
 - Pre-made replies (dx)
 - Config-driven (server IDs, category IDs, bot token)
 - **Streamlit Transcript Viewer** — Staff-only web UI to browse, search, and filter transcripts with image rendering and internal note toggling
+- **Logging** — Logs bot activity and errors to the `logs/` directory for easier debugging and monitoring.
 
 ## Requirements
 - Python 3.10+ recommended
@@ -36,8 +37,8 @@ Users can DM the bot to open a private ticket channel inside a configured catego
 ## Installation (Windows)
 1. Clone the repo:
    ```
-   git clone https://github.com/yourusername/Modmail-master.git
-   cd Modmail-master
+   git clone https://github.com/VeeBuiltThat/CCAC-MousseMail-PYTHON.git
+   cd CCAC-MousseMail-PYTHON
    ```
 2. Create and activate a virtual environment:
    ```
@@ -54,9 +55,9 @@ Create or update `config/config.json` with your settings. Minimal example:
 ```json
 {
   "token": "YOUR_BOT_TOKEN",
-  "guild_id": 123456789012345678,
-  "contact_category_id": 987654321098765432,
-  "staff_role_id": 234567890123456789,
+  "guild_id": "GUILD_ID_HERE",
+  "contact_category_id": "CONTACT_CATEGORY_ID_HERE",
+  "staff_role_id": "STAFF_ROLE_ID_HERE",
   "prefix": "!"
 }
 ```
@@ -123,7 +124,7 @@ For full setup and configuration, see [TRANSCRIPT_VIEWER_README.md](TRANSCRIPT_V
 This project is licensed under the MIT License. See the LICENSE file for details.
 
 ## Contact
-Maintainter: yourusername — open an issue or PR for changes.
+Maintainer: [VeeBuiltThat](https://github.com/VeeBuiltThat) — open an issue or PR for changes.
 
 ## Changelog
 - v0.1 — Initial improved README and documentation
