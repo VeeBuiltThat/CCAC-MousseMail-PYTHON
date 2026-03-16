@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import os
+from dotenv import load_dotenv
 import asyncio
 import discord
 from discord.ext import commands
@@ -22,7 +23,7 @@ TICKET_MESSAGES = getattr(app_config, "TICKET_MESSAGES", [])
 TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")
 LOG_DIR = getattr(app_config, "LOG_DIR", "logs")
 TICKET_REMINDER_HOURS = getattr(app_config, "TICKET_REMINDER_HOURS", 48)
-BOT_TOKEN = getattr(app_config, "BOT_TOKEN", None) or getattr(app_config, "DISCORD_TOKEN", None)
+BOT_TOKEN = os.getenv("DISCORD_TOKEN")
 ERROR_CHANNEL_ID = getattr(app_config, "ERROR_CHANNEL_ID", 1482074428606255154)
 
 BOT_BUILD_MARKER = getattr(app_config, "BOT_BUILD_MARKER", "2026-03-04T14:58Z-note-fix-v3")
@@ -1001,22 +1002,6 @@ async def _send_category_details(interaction: discord.Interaction, category_key:
 
 
 
-def run_web_server():
-    import sys
-    if '.' not in sys.path:
-        sys.path.insert(0, '.')
-    try:
-        from web_server import app
-    except ModuleNotFoundError:
-        logger.warning("web_server.py not found; skipping web server thread.")
-        return
-    app.run(port=5000, host='0.0.0.0')
-
-
 if __name__ == "__main__":
-    # Start Flask server in a separate thread
-    web_thread = threading.Thread(target=run_web_server, daemon=True)
-    web_thread.start()
-
     bot = ModmailBot()
     bot.run()

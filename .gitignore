@@ -83,6 +83,3 @@ Desktop.ini
 # Static / web files to hide
 index.html
 main.css
-
-# Server code to hide
-web_server.py
