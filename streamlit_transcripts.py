@@ -39,6 +39,31 @@ except Exception:
 DEFAULT_TRANSCRIPT_DIRS = ["transcripts", "logs"]
 DEFAULT_IMAGE_DIRS = ["transcripts/images", "logs/images", "images"]
 DISCORD_API_BASE = "https://discord.com/api/v10"
+
+
+@st.cache_resource
+def _oauth_state_store() -> Dict[str, float]:
+    """Server-wide store of issued OAuth states -> expiry timestamp."""
+    return {}
+
+
+def _issue_oauth_state() -> str:
+    state = secrets.token_urlsafe(24)
+    store = _oauth_state_store()
+    now = datetime.now(timezone.utc).timestamp()
+    expired = [k for k, v in list(store.items()) if v < now]
+    for k in expired:
+        del store[k]
+    store[state] = now + 600  # valid for 10 minutes
+    return state
+
+
+def _validate_and_consume_oauth_state(state: str) -> bool:
+    store = _oauth_state_store()
+    expiry = store.pop(state, None)
+    if expiry is None:
+        return False
+    return datetime.now(timezone.utc).timestamp() < expiry
 DISCORD_AUTH_URL = "https://discord.com/oauth2/authorize"
 CCAC_MAIN_GUILD_ID = 1240448660266029126
 CCAC_STREAMLIT_ROLE_ID = 1334950965408956527
@@ -141,7 +166,7 @@ def ensure_discord_auth() -> Dict[str, Any]:
     if "discord_auth" not in st.session_state:
         st.session_state.discord_auth = None
     if "discord_oauth_state" not in st.session_state:
-        st.session_state.discord_oauth_state = secrets.token_urlsafe(24)
+        st.session_state.discord_oauth_state = _issue_oauth_state()
 
     settings = get_discord_oauth_settings()
     missing = [
@@ -163,7 +188,7 @@ def ensure_discord_auth() -> Dict[str, Any]:
     state = raw_state[0] if isinstance(raw_state, list) and raw_state else str(raw_state or "")
 
     if code and not st.session_state.discord_auth:
-        if state != st.session_state.discord_oauth_state:
+        if not _validate_and_consume_oauth_state(state):
             st.error("Discord login state validation failed. Please try again.")
             st.stop()
         try:
@@ -182,7 +207,7 @@ def ensure_discord_auth() -> Dict[str, Any]:
                 "user": user,
                 "member": member,
             }
-            st.session_state.discord_oauth_state = secrets.token_urlsafe(24)
+            st.session_state.discord_oauth_state = _issue_oauth_state()
             clear_auth_query_params()
             st.rerun()
         except Exception as e:
@@ -194,6 +219,7 @@ def ensure_discord_auth() -> Dict[str, Any]:
 
     st.sidebar.write("🔐 Staff sign-in")
     st.sidebar.caption("Sign in with Discord. Access is limited to members with the required CCAC role.")
+    # Re-use the current session's state (already registered in the server-side store)
     st.sidebar.link_button("Sign in with Discord", build_discord_login_url(st.session_state.discord_oauth_state))
     st.stop()
 
@@ -951,7 +977,7 @@ def main():
     st.sidebar.caption(f"Guild: {CCAC_MAIN_GUILD_ID} · Required role: {CCAC_STREAMLIT_ROLE_ID}")
     if st.sidebar.button("Sign out"):
         st.session_state.discord_auth = None
-        st.session_state.discord_oauth_state = secrets.token_urlsafe(24)
+        st.session_state.discord_oauth_state = _issue_oauth_state()
         st.rerun()
 
     query_section = normalize_query_value(st.query_params.get("section", ""))
