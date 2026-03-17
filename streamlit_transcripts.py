@@ -107,7 +107,7 @@ def build_discord_login_url(state: str) -> str:
         "client_id": settings["client_id"],
         "redirect_uri": settings["redirect_uri"],
         "response_type": "code",
-        "scope": "identify guilds guilds.members.read",
+        "scope": "identify guilds",
         "state": state,
         "prompt": "consent",
     }
@@ -129,11 +129,11 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
     return http_json(f"{DISCORD_API_BASE}/oauth2/token", method="POST", headers=headers, data=payload)
 
 
-def fetch_discord_identity(access_token: str) -> Dict[str, Any]:
+def fetch_discord_identity(access_token: str):
     headers = {"Authorization": f"Bearer {access_token}"}
     user = http_json(f"{DISCORD_API_BASE}/users/@me", headers=headers)
-    member = http_json(f"{DISCORD_API_BASE}/users/@me/guilds/{CCAC_MAIN_GUILD_ID}/member", headers=headers)
-    return {"user": user, "member": member}
+    guilds = http_json(f"{DISCORD_API_BASE}/users/@me/guilds", headers=headers)
+    return {"user": user, "guilds": guilds}
 
 
 def clear_auth_query_params():
