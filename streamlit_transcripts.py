@@ -41,29 +41,26 @@ DEFAULT_IMAGE_DIRS = ["transcripts/images", "logs/images", "images"]
 DISCORD_API_BASE = "https://discord.com/api/v10"
 
 
-@st.cache_resource
-def _oauth_state_store() -> Dict[str, float]:
-    """Server-wide store of issued OAuth states -> expiry timestamp."""
-    return {}
-
-
 def _issue_oauth_state() -> str:
     state = secrets.token_urlsafe(24)
-    store = _oauth_state_store()
-    now = datetime.now(timezone.utc).timestamp()
-    expired = [k for k, v in list(store.items()) if v < now]
-    for k in expired:
-        del store[k]
-    store[state] = now + 600  # valid for 10 minutes
+    st.session_state["oauth_state"] = state
+    st.session_state["oauth_state_expiry"] = datetime.now(timezone.utc).timestamp() + 600
     return state
 
 
 def _validate_and_consume_oauth_state(state: str) -> bool:
-    store = _oauth_state_store()
-    expiry = store.pop(state, None)
-    if expiry is None:
+    saved_state = st.session_state.get("oauth_state")
+    expiry = st.session_state.get("oauth_state_expiry", 0)
+
+    if not saved_state or state != saved_state:
         return False
-    return datetime.now(timezone.utc).timestamp() < expiry
+
+    if datetime.now(timezone.utc).timestamp() > expiry:
+        return False
+
+    st.session_state.pop("oauth_state", None)
+    st.session_state.pop("oauth_state_expiry", None)
+    return True
 DISCORD_AUTH_URL = "https://discord.com/oauth2/authorize"
 CCAC_MAIN_GUILD_ID = 1240448660266029126
 CCAC_STREAMLIT_ROLE_ID = 1334950965408956527
@@ -207,7 +204,6 @@ def ensure_discord_auth() -> Dict[str, Any]:
                 "user": user,
                 "member": member,
             }
-            st.session_state.discord_oauth_state = _issue_oauth_state()
             clear_auth_query_params()
             st.rerun()
         except Exception as e:
@@ -977,7 +973,9 @@ def main():
     st.sidebar.caption(f"Guild: {CCAC_MAIN_GUILD_ID} · Required role: {CCAC_STREAMLIT_ROLE_ID}")
     if st.sidebar.button("Sign out"):
         st.session_state.discord_auth = None
-        st.session_state.discord_oauth_state = _issue_oauth_state()
+        st.session_state.pop("discord_oauth_state", None)
+        st.session_state.pop("oauth_state", None)
+        st.session_state.pop("oauth_state_expiry", None)
         st.rerun()
 
     query_section = normalize_query_value(st.query_params.get("section", ""))
