@@ -63,7 +63,13 @@ def _validate_and_consume_oauth_state(state: str) -> bool:
     return True
 DISCORD_AUTH_URL = "https://discord.com/oauth2/authorize"
 CCAC_MAIN_GUILD_ID = 1240448660266029126
-CCAC_STREAMLIT_ROLE_ID = 1334950965408956527
+CCAC_ALLOWED_ROLE_IDS = {
+    1334289756539846656,  # Jr. mod
+    1243559774847766619,  # mod
+    1243929060145631262,  # admin
+    1240455108047671406,  # owner
+    1243929202785386527,  # tech
+}
 APP_ROOT = Path(__file__).resolve().parent
 
 # MySQL Database configuration (same as bot)
@@ -197,8 +203,8 @@ def ensure_discord_auth() -> Dict[str, Any]:
             user = identity.get("user", {})
             member = identity.get("member", {})
             role_ids = {int(role_id) for role_id in member.get("roles", [])}
-            if CCAC_STREAMLIT_ROLE_ID not in role_ids:
-                raise PermissionError("Your Discord account does not have the required CCAC Streamlit access role.")
+            if not role_ids.intersection(CCAC_ALLOWED_ROLE_IDS):
+                raise PermissionError("Your Discord account does not have the required CCAC staff role (Jr. Mod, Mod, Admin, Owner, or Tech).")
             st.session_state.discord_auth = {
                 "access_token": access_token,
                 "user": user,
@@ -970,7 +976,7 @@ def main():
 
     display_name = discord_user.get("global_name") or discord_user.get("username") or "Unknown user"
     st.sidebar.success(f"✅ Signed in as {display_name}")
-    st.sidebar.caption(f"Guild: {CCAC_MAIN_GUILD_ID} · Required role: {CCAC_STREAMLIT_ROLE_ID}")
+    st.sidebar.caption(f"Guild: {CCAC_MAIN_GUILD_ID} · Required roles: Jr. Mod / Mod / Admin / Owner / Tech")
     if st.sidebar.button("Sign out"):
         st.session_state.discord_auth = None
         st.session_state.pop("discord_oauth_state", None)
