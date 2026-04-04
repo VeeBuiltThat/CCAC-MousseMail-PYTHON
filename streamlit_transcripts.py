@@ -559,6 +559,9 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
             align_style = "justify-content:flex-end;"
             avatar_col_idx, msg_col_idx = 1, 0
 
+        # Define columns for each message row
+        row = st.columns([1, 8])
+
         if is_staff_msg:
             # Staff: right side (msg, then avatar)
             with row[1]:
