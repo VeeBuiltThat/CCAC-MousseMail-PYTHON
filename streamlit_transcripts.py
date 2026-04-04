@@ -968,6 +968,8 @@ def query_custom_url(url: str):
         st.error(f"DB error: {e}")
     return None
 
+settings = get_discord_oauth_settings()
+st.write("Redirect URI being used:", settings["redirect_uri"])
 
 def main():
     st.set_page_config(page_title="Transcript Viewer", layout="wide")
