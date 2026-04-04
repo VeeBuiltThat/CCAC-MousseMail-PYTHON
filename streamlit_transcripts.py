@@ -74,7 +74,12 @@ def get_secret_value(key: str, default: str = "") -> str:
 
 
 def http_json(url: str, *, method: str = "GET", headers: Dict[str, str] = None, data: bytes = None) -> Dict[str, Any]:
-    req = Request(url, data=data, headers=headers or {}, method=method)
+    merged_headers = {
+        "User-Agent": "DiscordBot (https://ccac-moussemail.streamlit.app, 1.0)",
+    }
+    if headers:
+        merged_headers.update(headers)
+    req = Request(url, data=data, headers=merged_headers, method=method)
     with urlopen(req, timeout=20) as response:
         payload = response.read().decode("utf-8")
         return json.loads(payload) if payload else {}
@@ -135,15 +140,11 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
             "redirect_uri": settings["redirect_uri"],
         }
     ).encode("utf-8")
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    
-    from urllib.error import HTTPError
-    try:
-        return http_json(f"{DISCORD_API_BASE}/oauth2/token", method="POST", headers=headers, data=payload)
-    except HTTPError as e:
-        body = e.read().decode("utf-8")
-        st.error(f"Discord token exchange failed — status {e.code}: {body}")
-        raise
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "DiscordBot (https://ccac-moussemail.streamlit.app, 1.0)",
+    }
+    return http_json(f"{DISCORD_API_BASE}/oauth2/token", method="POST", headers=headers, data=payload)
 
 
 def fetch_discord_user(access_token: str) -> Dict[str, Any]:
