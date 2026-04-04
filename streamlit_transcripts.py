@@ -540,13 +540,13 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         extra_top_margin = 28 if prev_author is not None and author != prev_author else 8
         prev_author = author
 
-        # Bubble color and border for staff/user/system
+        # Minimal, modern bubble style
         if is_staff_msg:
-            bubble_style = "background:#232e4a;border-radius:14px 14px 14px 4px;border-left:5px solid #7aa2ff;"
+            bubble_style = "background:#26345a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
         elif is_system:
-            bubble_style = "background:#1f4a43;border-radius:14px 14px 14px 4px;border-left:5px solid #37dda1;"
+            bubble_style = "background:#1f4a43;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#e6fff6;"
         else:
-            bubble_style = "background:#23273a;border-radius:14px 14px 14px 4px;border-left:5px solid #a2a9b8;"
+            bubble_style = "background:#23273a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
 
         # Outer container for spacing between authors
         st.markdown(f"<div style='margin-top:{extra_top_margin}px;'></div>", unsafe_allow_html=True)
@@ -559,9 +559,9 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                 st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
-            # Message bubble
+            # Message bubble (no highlighted name inside)
             st.markdown(
-                f"<div style='{bubble_style}padding:13px 18px 13px 16px;margin-bottom:2px;min-width:60px;display:inline-block;'>"
+                f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>"
                 f"{(content or '').replace(chr(10), '<br>')}"
                 f"</div>", unsafe_allow_html=True)
 
