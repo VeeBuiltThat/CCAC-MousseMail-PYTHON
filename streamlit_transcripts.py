@@ -520,7 +520,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         ts = msg.get("ts") or msg.get("timestamp") or ""
         ts_label = relative_time_label(ts) or ts
         is_system = role == "system"
-        is_staff = (role == "staff") or is_staff_response_message(msg, content) or is_staff(author, staff_identifiers)
+        is_staff_msg = (role == "staff") or is_staff_response_message(msg, content) or is_staff(author, staff_identifiers)
 
         avatar_url = get_avatar_url(msg, author)
         avatar_col, message_col = st.columns([0.09, 0.91], gap="small")
@@ -529,7 +529,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
 
         with message_col:
             # Author name with badge if staff
-            if is_staff:
+            if is_staff_msg:
                 st.markdown(f"**{author}** <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span>", unsafe_allow_html=True)
             else:
                 st.markdown(f"**{author}**")
@@ -538,7 +538,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
 
             # Card style: blue for staff, gray for user, green for system
             card_style = (
-                "background:rgba(122,162,255,0.18);border-left:5px solid #7aa2ff;" if is_staff else
+                "background:rgba(122,162,255,0.18);border-left:5px solid #7aa2ff;" if is_staff_msg else
                 ("background:rgba(55,221,161,0.10);border-left:5px solid #37dda1;" if is_system else
                  "background:rgba(41,52,84,0.45);border-left:3px solid rgba(122,162,255,0.15);")
             )
