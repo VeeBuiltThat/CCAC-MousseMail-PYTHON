@@ -520,6 +520,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         ts = msg.get("ts") or msg.get("timestamp") or ""
         ts_label = relative_time_label(ts) or ts
         is_system = role == "system"
+        is_staff = (role == "staff") or is_staff_response_message(msg, content) or is_staff(author, staff_identifiers)
 
         avatar_url = get_avatar_url(msg, author)
         avatar_col, message_col = st.columns([0.09, 0.91], gap="small")
@@ -527,12 +528,24 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
             st.image(avatar_url, width=42)
 
         with message_col:
-            st.markdown(f"**{author}**")
+            # Author name with badge if staff
+            if is_staff:
+                st.markdown(f"**{author}** <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"**{author}**")
             if ts_label:
                 st.caption(ts_label)
 
-            card_class = "msg-card msg-system" if is_system else "msg-card"
-            st.markdown(f"<div class='{card_class}'>{(content or '').replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
+            # Card style: blue for staff, gray for user, green for system
+            card_style = (
+                "background:rgba(122,162,255,0.18);border-left:5px solid #7aa2ff;" if is_staff else
+                ("background:rgba(55,221,161,0.10);border-left:5px solid #37dda1;" if is_system else
+                 "background:rgba(41,52,84,0.45);border-left:3px solid rgba(122,162,255,0.15);")
+            )
+            st.markdown(
+                f"<div class='msg-card' style='{card_style}margin-bottom:8px;padding:10px 14px;border-radius:8px;'>"
+                f"{(content or '').replace(chr(10), '<br>')}"
+                f"</div>", unsafe_allow_html=True)
 
             embeds = msg.get("embeds", [])
             if not content and isinstance(embeds, list):
