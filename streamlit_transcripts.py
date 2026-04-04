@@ -560,11 +560,12 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
             bubble_style = "background:#23272f;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);color:#e6e6e6;"
 
         # Define columns for each message row
-        row = st.columns([1, 8])
-
         if is_staff_msg:
-            # Staff: right side (msg, then avatar)
+            # Staff: avatar and message both on the right
+            row = st.columns([8, 1])
             with row[1]:
+                st.image(avatar_url, width=44)
+            with row[0]:
                 st.markdown(f"<div style='text-align:right;margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
                 st.markdown(
                     f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;text-align:left;'>"
@@ -588,10 +589,9 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                         st.write(f"[Image not found: {img_path}]")
                 for url in msg.get("attachments", []):
                     st.write(f"[Attachment: {url}]")
-            with row[0]:
-                st.image(avatar_url, width=44)
         else:
-            # User/system: left side (avatar, then msg)
+            # User/system: avatar left, message right
+            row = st.columns([1, 8])
             with row[0]:
                 st.image(avatar_url, width=44)
             with row[1]:
