@@ -556,8 +556,8 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         # Minimal, modern bubble style
         if is_staff_msg:
             bubble_style = "background:#26345a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
-            align_style = "justify-content:flex-end;"
-            avatar_col_idx, msg_col_idx = 1, 0
+        else:
+            bubble_style = "background:#23272f;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);color:#e6e6e6;"
 
         # Define columns for each message row
         row = st.columns([1, 8])
