@@ -408,8 +408,19 @@ def infer_closed_by(messages: List[Dict[str, Any]], staff_identifiers: List[str]
 def render_ticket_summary_panel(ticket: Dict[str, Any], messages: List[Dict[str, Any]], staff_identifiers: List[str]):
     server_name = ticket.get("guild_name") or "Unknown"
     owner_name = ticket.get("owner_name") or "Unknown"
-    closed_by = infer_closed_by(messages, staff_identifiers)
-    members_value = f"{owner_name}, {closed_by}" if closed_by != owner_name else owner_name
+    closed_by_name = ticket.get("closed_by") or infer_closed_by(messages, staff_identifiers)
+    closed_by_id = ticket.get("closed_by_id") or ticket.get("closed_by_user_id") or ""
+    closed_by_display = f"{closed_by_name} | {closed_by_id}" if closed_by_id else closed_by_name
+    members_value = f"{owner_name}, {closed_by_name}" if closed_by_name != owner_name else owner_name
+    closed_at = ticket.get("closed_at")
+    closed_date = ""
+    if closed_at:
+        try:
+            dt = parse_iso_timestamp(closed_at)
+            if dt:
+                closed_date = dt.strftime("%Y-%m-%d")
+        except Exception:
+            pass
 
     st.markdown(
         f"""
@@ -428,7 +439,11 @@ def render_ticket_summary_panel(ticket: Dict[str, Any], messages: List[Dict[str,
             </div>
             <div class="ticket-summary-row">
                 <div class="ticket-summary-label">Closed by</div>
-                <div class="ticket-summary-value">{closed_by}</div>
+                <div class="ticket-summary-value">{closed_by_display}</div>
+            </div>
+            <div class="ticket-summary-row">
+                <div class="ticket-summary-label">Closed date</div>
+                <div class="ticket-summary-value">{closed_date}</div>
             </div>
         </div>
         """,
@@ -533,8 +548,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                 st.markdown(f"**{author}** <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span>", unsafe_allow_html=True)
             else:
                 st.markdown(f"**{author}**")
-            if ts_label:
-                st.caption(ts_label)
+            # No timestamp above messages
 
             # Card style: blue for staff, gray for user, green for system
             card_style = (
