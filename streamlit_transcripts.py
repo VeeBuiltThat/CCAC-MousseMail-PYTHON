@@ -524,41 +524,46 @@ def get_avatar_url(msg: Dict[str, Any], author: str) -> str:
 
 
 def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path, staff_identifiers: List[str], show_internal: bool, internal_markers: List[str]):
-    for msg in messages:
+    prev_author = None
+    for idx, msg in enumerate(messages):
         author, content = normalize_display_message(msg)
         internal = message_is_internal(msg, content, internal_markers)
         if internal and not show_internal:
             continue
 
         role = str(msg.get("role", "")).lower()
-        ts = msg.get("ts") or msg.get("timestamp") or ""
-        ts_label = relative_time_label(ts) or ts
         is_system = role == "system"
         is_staff_msg = (role == "staff") or is_staff_response_message(msg, content) or is_staff(author, staff_identifiers)
-
         avatar_url = get_avatar_url(msg, author)
-        # Use a single horizontal block for avatar and message, tightly grouped
-        msg_container = st.container()
-        with msg_container:
-            avatar_col, content_col = st.columns([0.12, 0.88], gap="small")
-            with avatar_col:
-                st.image(avatar_url, width=42)
-            with content_col:
-                # Author name with badge if staff
-                if is_staff_msg:
-                    st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
-                # Card style: blue for staff, gray for user, green for system
-                card_style = (
-                    "background:rgba(122,162,255,0.18);border-left:5px solid #7aa2ff;" if is_staff_msg else
-                    ("background:rgba(55,221,161,0.10);border-left:5px solid #37dda1;" if is_system else
-                     "background:rgba(41,52,84,0.45);border-left:3px solid rgba(122,162,255,0.15);")
-                )
-                st.markdown(
-                    f"<div class='msg-card' style='{card_style}margin-bottom:2px;padding:10px 14px;border-radius:8px;'>"
-                    f"{(content or '').replace(chr(10), '<br>')}"
-                    f"</div>", unsafe_allow_html=True)
+
+        # Add extra vertical space if author changes
+        extra_top_margin = 28 if prev_author is not None and author != prev_author else 8
+        prev_author = author
+
+        # Bubble color and border for staff/user/system
+        if is_staff_msg:
+            bubble_style = "background:#232e4a;border-radius:14px 14px 14px 4px;border-left:5px solid #7aa2ff;"
+        elif is_system:
+            bubble_style = "background:#1f4a43;border-radius:14px 14px 14px 4px;border-left:5px solid #37dda1;"
+        else:
+            bubble_style = "background:#23273a;border-radius:14px 14px 14px 4px;border-left:5px solid #a2a9b8;"
+
+        # Outer container for spacing between authors
+        st.markdown(f"<div style='margin-top:{extra_top_margin}px;'></div>", unsafe_allow_html=True)
+        row = st.columns([0.11, 0.89], gap="small")
+        with row[0]:
+            st.image(avatar_url, width=44)
+        with row[1]:
+            # Username and badge above bubble
+            if is_staff_msg:
+                st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
+            # Message bubble
+            st.markdown(
+                f"<div style='{bubble_style}padding:13px 18px 13px 16px;margin-bottom:2px;min-width:60px;display:inline-block;'>"
+                f"{(content or '').replace(chr(10), '<br>')}"
+                f"</div>", unsafe_allow_html=True)
 
             embeds = msg.get("embeds", [])
             if not content and isinstance(embeds, list):
