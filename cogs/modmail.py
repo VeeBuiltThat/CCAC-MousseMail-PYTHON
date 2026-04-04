@@ -30,49 +30,17 @@ class Modmail(commands.Cog):
         self.category_id = CATEGORY_ID
         self.log_channel_id = LOG_CHANNEL_ID
 
-        self.ticket_category_ids = TICKET_CATEGORY_IDS
-
-        # ensure directories exist
-        os.makedirs(TRANSCRIPT_DIR, exist_ok=True)
-        os.makedirs(IMAGE_DIR, exist_ok=True)
-    """
-    Modmail cog with robust scheduling + DB compatibility.
-
-    Database expectations (bot.db):
-      - add_ticket_timer(channel_id, user_id, action, execute_at)  # execute_at as 'YYYY-MM-DD HH:MM:SS' (preferred) or int timestamp (fallback)
-      - cancel_ticket_timer(channel_id, action)
-      - close_ticket(channel_id, closed_at)  # closed_at as 'YYYY-MM-DD HH:MM:SS' (preferred) or int timestamp (fallback)
-      - add_watcher(channel_id, user_id)
-    """
-    
-    def __init__(self, bot):
-        self.bot = bot
-        self.guild_id = 1346839676333461625
-        self.category_id = 1352669054346854502
-        self.log_channel_id = 1427986115901526067
-
         # in-memory state (non-persistent)
         self.open_tickets = {}         # { user_id: channel_id }
         self.delayed_closures = {}     # { channel_id: asyncio.Task }
         self.suspended_tickets = {}    # { channel_id: task_or_flag }
         self.notify_watchers = {}      # { channel_id: [user_ids...] }
 
-        self.ticket_category_ids = {
-            1346881466881146910,  # contact
-            1346882153279000648,  # trusted
-            1402347454438838443,  # questions
-            1402347609460576367,  # suggestions
-            1402347709976936591,  # partnerships
-            1402347829409874032,  # reports
-            1402347868756643900,  # appeals
-            1402348823598203061,  # ko-fi
-            1346881386510024745,  # nsfw
-            1346882435400466495,   # tech
-            1419606665891811469, # emergancy
-            1419606732971180104, # events
-            1419606799438319660 # jrmod
-            
-        }
+        self.ticket_category_ids = TICKET_CATEGORY_IDS
+
+        # ensure directories exist
+        os.makedirs(TRANSCRIPT_DIR, exist_ok=True)
+        os.makedirs(IMAGE_DIR, exist_ok=True)
 
     
     # ---------------- Helpers ----------------
