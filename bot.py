@@ -756,13 +756,25 @@ class ClaimTicketButton(discord.ui.View):
             f"✅ {mod.mention} has claimed this ticket.", ephemeral=True
         )
 
-        # Notify channel
-        await interaction.followup.send(
-            embed=discord.Embed(
-                description=f"Ticket claimed by {mod.mention}.",
-                color=discord.Color.orange()
+        # Notify channel with robust error handling
+        try:
+            await interaction.followup.send(
+                embed=discord.Embed(
+                    description=f"Ticket claimed by {mod.mention}.",
+                    color=discord.Color.orange()
+                )
             )
-        )
+        except discord.errors.NotFound:
+            logger.warning("Webhook for followup.send not found when notifying ticket claim. Falling back to channel send.")
+            try:
+                await interaction.channel.send(
+                    embed=discord.Embed(
+                        description=f"Ticket claimed by {mod.mention}.",
+                        color=discord.Color.orange()
+                    )
+                )
+            except Exception:
+                logger.exception("Failed to send ticket claim notification to channel.")
 
         # Disable the button
         for item in self.children:
@@ -814,10 +826,20 @@ async def _send_category_details(interaction: discord.Interaction, category_key:
     fallback_channel = bot.find_open_ticket_channel_for_user(user.id, guild=guild)
     if existing_channel or fallback_channel:
         if interaction.response.is_done():
-            await interaction.followup.send(
-                "⚠️ You already have an open ticket. You cannot open another one.",
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send(
+                    "⚠️ You already have an open ticket. You cannot open another one.",
+                    ephemeral=True
+                )
+            except discord.errors.NotFound:
+                logger.warning("Webhook for followup.send not found when warning about open ticket. Falling back to channel send.")
+                try:
+                    await interaction.channel.send(
+                        f"⚠️ {user.mention}, you already have an open ticket. You cannot open another one.",
+                        allowed_mentions=discord.AllowedMentions(users=True)
+                    )
+                except Exception:
+                    logger.exception("Failed to send open ticket warning to channel.")
         else:
             await interaction.response.send_message(
                 "⚠️ You already have an open ticket. You cannot open another one.",
@@ -827,10 +849,20 @@ async def _send_category_details(interaction: discord.Interaction, category_key:
 
     category_id = CATEGORY_IDS.get(category_key)
     if not category_id:
-        await interaction.followup.send(
-            "⚠️ That ticket category is not configured. Please contact staff.",
-            ephemeral=True
-        )
+        try:
+            await interaction.followup.send(
+                "⚠️ That ticket category is not configured. Please contact staff.",
+                ephemeral=True
+            )
+        except discord.errors.NotFound:
+            logger.warning("Webhook for followup.send not found when warning about unconfigured category. Falling back to channel send.")
+            try:
+                await interaction.channel.send(
+                    f"⚠️ {user.mention}, that ticket category is not configured. Please contact staff.",
+                    allowed_mentions=discord.AllowedMentions(users=True)
+                )
+            except Exception:
+                logger.exception("Failed to send unconfigured category warning to channel.")
         return
 
     details_map = {
@@ -916,10 +948,20 @@ async def _send_category_details(interaction: discord.Interaction, category_key:
 
     created = bot.db.create_ticket_entry(user, ticket_channel, category_id, category_key)
     if not created:
-        await interaction.followup.send(
-            "⚠️ You already have an open ticket. You cannot open another one.",
-            ephemeral=True
-        )
+        try:
+            await interaction.followup.send(
+                "⚠️ You already have an open ticket. You cannot open another one.",
+                ephemeral=True
+            )
+        except discord.errors.NotFound:
+            logger.warning("Webhook for followup.send not found when warning about duplicate ticket. Falling back to channel send.")
+            try:
+                await interaction.channel.send(
+                    f"⚠️ {user.mention}, you already have an open ticket. You cannot open another one.",
+                    allowed_mentions=discord.AllowedMentions(users=True)
+                )
+            except Exception:
+                logger.exception("Failed to send duplicate ticket warning to channel.")
         try:
             await ticket_channel.delete()
         except Exception as e:
