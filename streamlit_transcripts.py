@@ -558,20 +558,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
             bubble_style = "background:#26345a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
             align_style = "justify-content:flex-end;"
             avatar_col_idx, msg_col_idx = 1, 0
-        elif is_system:
-            bubble_style = "background:#1f4a43;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#e6fff6;"
-            align_style = "justify-content:flex-start;"
-            avatar_col_idx, msg_col_idx = 0, 1
-        else:
-            bubble_style = "background:#23273a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
-            align_style = "justify-content:flex-start;"
-            avatar_col_idx, msg_col_idx = 0, 1
 
-        # Outer container for spacing between authors
-        st.markdown(f"<div style='margin-top:{extra_top_margin}px;'></div>", unsafe_allow_html=True)
-        row = st.columns([0.11, 0.89], gap="small")
-        # Use flexbox to align staff messages to the right
-        st.markdown(f"<div style='display:flex;{align_style}'>", unsafe_allow_html=True)
         if is_staff_msg:
             # Staff: right side (msg, then avatar)
             with row[1]:
@@ -580,12 +567,55 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                     f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;text-align:left;'>"
                     f"{(content or '').replace(chr(10), '<br>')}"
                     f"</div>", unsafe_allow_html=True)
+                # Embeds, images, attachments for staff
+                embeds = msg.get("embeds", [])
+                if not content and isinstance(embeds, list):
+                    for embed in embeds:
+                        pass
+                for img_path in msg.get("images", []):
+                    p = Path(img_path)
+                    if not p.exists():
+                        p = image_root.joinpath(Path(img_path).name)
+                    if p.exists():
+                        try:
+                            st.image(Image.open(p), use_column_width=True)
+                        except Exception as e:
+                            st.write(f"[Image could not be opened: {p} ({e})]")
+                    else:
+                        st.write(f"[Image not found: {img_path}]")
+                for url in msg.get("attachments", []):
+                    st.write(f"[Attachment: {url}]")
             with row[0]:
                 st.image(avatar_url, width=44)
         else:
             # User/system: left side (avatar, then msg)
             with row[0]:
                 st.image(avatar_url, width=44)
+            with row[1]:
+                st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>"
+                    f"{(content or '').replace(chr(10), '<br>')}"
+                    f"</div>", unsafe_allow_html=True)
+                # Embeds, images, attachments for user
+                embeds = msg.get("embeds", [])
+                if not content and isinstance(embeds, list):
+                    for embed in embeds:
+                        pass
+                for img_path in msg.get("images", []):
+                    p = Path(img_path)
+                    if not p.exists():
+                        p = image_root.joinpath(Path(img_path).name)
+                    if p.exists():
+                        try:
+                            st.image(Image.open(p), use_column_width=True)
+                        except Exception as e:
+                            st.write(f"[Image could not be opened: {p} ({e})]")
+                    else:
+                        st.write(f"[Image not found: {img_path}]")
+                for url in msg.get("attachments", []):
+                    st.write(f"[Attachment: {url}]")
+        st.markdown("</div>", unsafe_allow_html=True)
             with row[1]:
                 if is_staff_msg:
                     st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
