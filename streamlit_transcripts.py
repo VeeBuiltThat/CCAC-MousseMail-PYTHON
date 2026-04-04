@@ -596,7 +596,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                 <div style="display: flex; flex-direction: row; justify-content: flex-start; align-items: flex-start; margin-bottom: 18px;">
                     <img src="{avatar_url}" width="44" style="border-radius:8px;margin-right:12px;object-fit:cover;" />
                     <div style="display: flex; flex-direction: column; align-items: flex-start;">
-                        <div style='margin-bottom:2px;'><strong>{author}</strong></div>
+                        <div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#a2b3ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>User</span></div>
                         <div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>
                             {(content or '').replace(chr(10), '<br>')}
                         </div>
