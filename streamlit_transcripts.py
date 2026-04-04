@@ -136,7 +136,14 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
         }
     ).encode("utf-8")
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    return http_json(f"{DISCORD_API_BASE}/oauth2/token", method="POST", headers=headers, data=payload)
+    
+    from urllib.error import HTTPError
+    try:
+        return http_json(f"{DISCORD_API_BASE}/oauth2/token", method="POST", headers=headers, data=payload)
+    except HTTPError as e:
+        body = e.read().decode("utf-8")
+        st.error(f"Discord token exchange failed — status {e.code}: {body}")
+        raise
 
 
 def fetch_discord_user(access_token: str) -> Dict[str, Any]:
