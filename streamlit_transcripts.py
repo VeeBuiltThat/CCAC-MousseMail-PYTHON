@@ -101,6 +101,16 @@ def get_discord_oauth_settings() -> Dict[str, str]:
     }
 
 
+def get_bot_token() -> str:
+    config_bot_token = getattr(app_config, "DISCORD_BOT_TOKEN", "") if app_config else ""
+    return str(
+        os.getenv("DISCORD_BOT_TOKEN")
+        or get_secret_value("DISCORD_BOT_TOKEN")
+        or config_bot_token
+        or ""
+    ).strip()
+
+
 def build_discord_login_url(state: str) -> str:
     settings = get_discord_oauth_settings()
     params = {
@@ -129,11 +139,25 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
     return http_json(f"{DISCORD_API_BASE}/oauth2/token", method="POST", headers=headers, data=payload)
 
 
-def fetch_discord_identity(access_token: str):
+def fetch_discord_user(access_token: str) -> Dict[str, Any]:
     headers = {"Authorization": f"Bearer {access_token}"}
-    user = http_json(f"{DISCORD_API_BASE}/users/@me", headers=headers)
-    guilds = http_json(f"{DISCORD_API_BASE}/users/@me/guilds", headers=headers)
-    return {"user": user, "guilds": guilds}
+    return http_json(f"{DISCORD_API_BASE}/users/@me", headers=headers)
+
+
+def fetch_member_roles(user_id: str) -> set:
+    """Use the bot token to look up the user's roles in the CCAC guild."""
+    bot_token = get_bot_token()
+    if not bot_token:
+        return set()
+    headers = {"Authorization": f"Bot {bot_token}"}
+    try:
+        member = http_json(
+            f"{DISCORD_API_BASE}/guilds/{CCAC_MAIN_GUILD_ID}/members/{user_id}",
+            headers=headers,
+        )
+        return {int(r) for r in member.get("roles", [])}
+    except Exception:
+        return set()
 
 
 def clear_auth_query_params():
@@ -172,16 +196,24 @@ def ensure_discord_auth() -> Dict[str, Any]:
             access_token = token_payload.get("access_token", "")
             if not access_token:
                 raise ValueError(token_payload.get("error_description") or "No access token returned by Discord.")
-            identity = fetch_discord_identity(access_token)
-            user = identity.get("user", {})
-            member = identity.get("member", {})
-            role_ids = {int(role_id) for role_id in member.get("roles", [])}
+
+            user = fetch_discord_user(access_token)
+            user_id = str(user.get("id", ""))
+
+            if not user_id:
+                raise ValueError("Could not retrieve user ID from Discord.")
+
+            role_ids = fetch_member_roles(user_id)
+
             if not role_ids.intersection(CCAC_ALLOWED_ROLE_IDS):
-                raise PermissionError("Your Discord account does not have the required CCAC staff role (Jr. Mod, Mod, Admin, Owner, or Tech).")
+                raise PermissionError(
+                    "Your Discord account does not have the required CCAC staff role "
+                    "(Jr. Mod, Mod, Admin, Owner, or Tech), or you are not a member of the server."
+                )
+
             st.session_state.discord_auth = {
                 "access_token": access_token,
                 "user": user,
-                "member": member,
             }
             clear_auth_query_params()
             st.rerun()
@@ -495,7 +527,6 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
             st.markdown(f"<div class='{card_class}'>{(content or '').replace(chr(10), '<br>')}</div>", unsafe_allow_html=True)
 
             embeds = msg.get("embeds", [])
-            # Avoid duplicate rendering when embed text was already folded into content.
             if not content and isinstance(embeds, list):
                 for embed in embeds:
                     if not isinstance(embed, dict):
@@ -936,9 +967,6 @@ def query_custom_url(url: str):
     except Exception as e:
         st.error(f"DB error: {e}")
     return None
-
-
-
 
 
 def main():
