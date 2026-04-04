@@ -15,8 +15,8 @@ from database_manager import DatabaseManager
 from dateutil.relativedelta import relativedelta
 import config as app_config
 
-GUILD_ID = getattr(app_config, "GUILD_ID", 0)
-STAFF_ROLE_ID = getattr(app_config, "STAFF_ROLE_ID", 0)
+GUILD_ID = getattr(app_config, "GUILD_ID", 1346839676333461625)
+STAFF_ROLE_ID = getattr(app_config, "STAFF_ROLE_ID", 1334950965408956527)
 CATEGORY_IDS = getattr(app_config, "CATEGORY_IDS", {})
 TICKET_MESSAGES = getattr(app_config, "TICKET_MESSAGES", [])
 TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")

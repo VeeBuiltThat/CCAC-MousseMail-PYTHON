@@ -48,8 +48,8 @@ class Modmail(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.guild_id = 1346839676333461625
-        self.category_id = 1386412081246200000
-        self.log_channel_id = 1352669054346854502
+        self.category_id = 1352669054346854502
+        self.log_channel_id = 1427986115901526067
 
         # in-memory state (non-persistent)
         self.open_tickets = {}         # { user_id: channel_id }
