@@ -465,11 +465,21 @@ def normalize_display_message(msg: Dict[str, Any]):
         # Remove 'user message' marker and possible username on next line
         if idx == 0 and lstripped.lower() == "user message":
             continue
-        # Remove username prefix if present (e.g., 'vee.dev_ message...')
-        if idx == 0 and lstripped.lower().startswith(author.lower()):
-            # Remove the author name and any following colon or whitespace
-            after = lstripped[len(author):].lstrip(" :|-")
-            cleaned_lines.append(after)
+        # Remove username prefix if present (robust: ignore case, allow colon, dash, pipe, whitespace)
+        if idx == 0:
+            prefix = author.strip().lower()
+            lstripped_lower = lstripped.lower()
+            # Acceptable separators after username
+            for sep in [":", "-", "|", ".", " "]:
+                if lstripped_lower.startswith(prefix + sep):
+                    after = lstripped[len(prefix + sep):].lstrip()
+                    cleaned_lines.append(after)
+                    break
+            else:
+                # Also handle exact match (username only)
+                if lstripped_lower == prefix:
+                    continue
+                cleaned_lines.append(line)
         else:
             cleaned_lines.append(line)
     normalized_content = "\n".join(cleaned_lines).strip()
