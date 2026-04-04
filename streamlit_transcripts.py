@@ -559,18 +559,20 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         else:
             bubble_style = "background:#23272f;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);color:#e6e6e6;"
 
-        # Define columns for each message row
-        if is_staff_msg:
-            # Staff: avatar and message both on the right
-            row = st.columns([8, 1])
-            with row[1]:
-                st.image(avatar_url, width=44)
-            with row[0]:
-                st.markdown(f"<div style='text-align:right;margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;text-align:left;'>"
-                    f"{(content or '').replace(chr(10), '<br>')}"
-                    f"</div>", unsafe_allow_html=True)
+        # Use a single column and flexbox for Discord-like alignment
+        with st.container():
+            if is_staff_msg:
+                st.markdown(f'''
+                <div style="display: flex; flex-direction: row; justify-content: flex-end; align-items: flex-start; margin-bottom: 18px;">
+                    <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                        <div style='text-align:right;margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>
+                        <div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;text-align:left;'>
+                            {(content or '').replace(chr(10), '<br>')}
+                        </div>
+                    </div>
+                    <img src="{avatar_url}" width="44" style="border-radius:8px;margin-left:12px;object-fit:cover;" />
+                </div>
+                ''', unsafe_allow_html=True)
                 # Embeds, images, attachments for staff
                 embeds = msg.get("embeds", [])
                 if not content and isinstance(embeds, list):
@@ -589,17 +591,18 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                         st.write(f"[Image not found: {img_path}]")
                 for url in msg.get("attachments", []):
                     st.write(f"[Attachment: {url}]")
-        else:
-            # User/system: avatar left, message right
-            row = st.columns([1, 8])
-            with row[0]:
-                st.image(avatar_url, width=44)
-            with row[1]:
-                st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>"
-                    f"{(content or '').replace(chr(10), '<br>')}"
-                    f"</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f'''
+                <div style="display: flex; flex-direction: row; justify-content: flex-start; align-items: flex-start; margin-bottom: 18px;">
+                    <img src="{avatar_url}" width="44" style="border-radius:8px;margin-right:12px;object-fit:cover;" />
+                    <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                        <div style='margin-bottom:2px;'><strong>{author}</strong></div>
+                        <div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>
+                            {(content or '').replace(chr(10), '<br>')}
+                        </div>
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
                 # Embeds, images, attachments for user
                 embeds = msg.get("embeds", [])
                 if not content and isinstance(embeds, list):
