@@ -457,6 +457,7 @@ def normalize_display_message(msg: Dict[str, Any]):
 
     lines = [line for line in content.splitlines()]
     cleaned_lines = []
+    prefix = author.strip().lower()
     for idx, line in enumerate(lines):
         lstripped = line.lstrip()
         # Remove any line that starts with 'STAFF RESPONSE:' (case-insensitive, with or without colon)
@@ -465,22 +466,18 @@ def normalize_display_message(msg: Dict[str, Any]):
         # Remove 'user message' marker and possible username on next line
         if idx == 0 and lstripped.lower() == "user message":
             continue
-        # Remove username prefix if present (robust: ignore case, allow colon, dash, pipe, whitespace)
-        if idx == 0:
-            prefix = author.strip().lower()
-            lstripped_lower = lstripped.lower()
-            # Acceptable separators after username
-            for sep in [":", "-", "|", ".", " "]:
-                if lstripped_lower.startswith(prefix + sep):
-                    after = lstripped[len(prefix + sep):].lstrip()
+        # Remove username prefix from every line if present (robust: ignore case, allow colon, dash, pipe, period, whitespace)
+        lstripped_lower = lstripped.lower()
+        for sep in [":", "-", "|", ".", " "]:
+            if lstripped_lower.startswith(prefix + sep):
+                after = lstripped[len(prefix + sep):].lstrip()
+                if after:
                     cleaned_lines.append(after)
-                    break
-            else:
-                # Also handle exact match (username only)
-                if lstripped_lower == prefix:
-                    continue
-                cleaned_lines.append(line)
+                break
         else:
+            # Also handle exact match (username only)
+            if lstripped_lower == prefix:
+                continue
             cleaned_lines.append(line)
     normalized_content = "\n".join(cleaned_lines).strip()
     return author, normalized_content
@@ -559,27 +556,46 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
         # Minimal, modern bubble style
         if is_staff_msg:
             bubble_style = "background:#26345a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
+            align_style = "justify-content:flex-end;"
+            avatar_col_idx, msg_col_idx = 1, 0
         elif is_system:
             bubble_style = "background:#1f4a43;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#e6fff6;"
+            align_style = "justify-content:flex-start;"
+            avatar_col_idx, msg_col_idx = 0, 1
         else:
             bubble_style = "background:#23273a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
+            align_style = "justify-content:flex-start;"
+            avatar_col_idx, msg_col_idx = 0, 1
 
         # Outer container for spacing between authors
         st.markdown(f"<div style='margin-top:{extra_top_margin}px;'></div>", unsafe_allow_html=True)
         row = st.columns([0.11, 0.89], gap="small")
-        with row[0]:
-            st.image(avatar_url, width=44)
-        with row[1]:
-            # Username and badge above bubble
-            if is_staff_msg:
-                st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
-            # Message bubble (no highlighted name inside)
-            st.markdown(
-                f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>"
-                f"{(content or '').replace(chr(10), '<br>')}"
-                f"</div>", unsafe_allow_html=True)
+        # Use flexbox to align staff messages to the right
+        st.markdown(f"<div style='display:flex;{align_style}'>", unsafe_allow_html=True)
+        if is_staff_msg:
+            # Staff: right side (msg, then avatar)
+            with row[1]:
+                st.markdown(f"<div style='text-align:right;margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;text-align:left;'>"
+                    f"{(content or '').replace(chr(10), '<br>')}"
+                    f"</div>", unsafe_allow_html=True)
+            with row[0]:
+                st.image(avatar_url, width=44)
+        else:
+            # User/system: left side (avatar, then msg)
+            with row[0]:
+                st.image(avatar_url, width=44)
+            with row[1]:
+                if is_staff_msg:
+                    st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>"
+                    f"{(content or '').replace(chr(10), '<br>')}"
+                    f"</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
             embeds = msg.get("embeds", [])
             if not content and isinstance(embeds, list):
