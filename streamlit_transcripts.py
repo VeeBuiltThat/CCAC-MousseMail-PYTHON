@@ -456,18 +456,17 @@ def normalize_display_message(msg: Dict[str, Any]):
     content = str(msg.get("content", "") or "")
 
     lines = [line for line in content.splitlines()]
-    if lines:
-        first_line = lines[0].strip().lower()
-        if first_line == "user message":
-            if len(lines) >= 2 and lines[1].strip():
-                author = lines[1].strip()
-                lines = lines[2:]
-            else:
-                lines = lines[1:]
-        elif first_line.startswith("staff response"):
-            lines = lines[1:]
-
-    normalized_content = "\n".join(lines).strip()
+    cleaned_lines = []
+    for idx, line in enumerate(lines):
+        lstripped = line.lstrip()
+        # Remove any line that starts with 'STAFF RESPONSE:' (case-insensitive, with or without colon)
+        if lstripped.lower().startswith("staff response"):
+            continue
+        # Remove 'user message' marker and possible username on next line
+        if idx == 0 and lstripped.lower() == "user message":
+            continue
+        cleaned_lines.append(line)
+    normalized_content = "\n".join(cleaned_lines).strip()
     return author, normalized_content
 
 
