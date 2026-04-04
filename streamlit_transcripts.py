@@ -615,60 +615,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                         st.write(f"[Image not found: {img_path}]")
                 for url in msg.get("attachments", []):
                     st.write(f"[Attachment: {url}]")
-        st.markdown("</div>", unsafe_allow_html=True)
-            with row[1]:
-                if is_staff_msg:
-                    st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div style='margin-bottom:2px;'><strong>{author}</strong></div>", unsafe_allow_html=True)
-                st.markdown(
-                    f"<div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>"
-                    f"{(content or '').replace(chr(10), '<br>')}"
-                    f"</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
-            embeds = msg.get("embeds", [])
-            if not content and isinstance(embeds, list):
-                for embed in embeds:
-                    if not isinstance(embed, dict):
-                        continue
-                    embed_title = embed.get("title", "")
-                    embed_author = embed.get("author", "")
-                    embed_description = embed.get("description", "")
-                    embed_fields = embed.get("fields", [])
-
-                    if embed_title:
-                        st.markdown(f"**{embed_title}**")
-                    if embed_author:
-                        st.caption(embed_author)
-                    if embed_description:
-                        st.write(embed_description)
-                    if isinstance(embed_fields, list):
-                        for field in embed_fields:
-                            if not isinstance(field, dict):
-                                continue
-                            field_name = field.get("name", "")
-                            field_value = field.get("value", "")
-                            if field_name and field_value:
-                                st.markdown(f"**{field_name}**")
-                                st.write(field_value)
-                            elif field_value:
-                                st.write(field_value)
-
-            for img_path in msg.get("images", []):
-                p = Path(img_path)
-                if not p.exists():
-                    p = image_root.joinpath(Path(img_path).name)
-                if p.exists():
-                    try:
-                        st.image(Image.open(p), use_column_width=True)
-                    except Exception as e:
-                        st.write(f"[Image could not be opened: {p} ({e})]")
-                else:
-                    st.write(f"[Image not found: {img_path}]")
-
-            for url in msg.get("attachments", []):
-                st.markdown(f"Attachment: [{url}]({url})")
 
 
 def render_messages(messages: List[Dict[str, Any]], image_root: Path, staff_identifiers: List[str], show_internal: bool, internal_markers: List[str]):
