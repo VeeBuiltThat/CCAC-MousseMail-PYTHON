@@ -970,7 +970,7 @@ def compute_staff_overview_metrics(tickets: List[Dict[str, Any]], db_transcripts
 def render_premade_messages_section() -> None:
     """Admin-only section: view, add, edit, and delete premade responses (dx_responses)."""
     st.subheader("Premade Messages")
-    st.caption("Changes here take effect immediately in the Discord bot (`!key` shortcuts).")
+    st.caption("Changes here take effect immediately in the Discord bot (`%key` shortcuts).")
 
     if not MYSQL_AVAILABLE:
         st.error("mysql-connector-python is not installed.")
@@ -986,7 +986,7 @@ def render_premade_messages_section() -> None:
     # ── Add new message ───────────────────────────────────────────────────────
     with st.expander("Add new premade message", expanded=not responses):
         new_key = st.text_input(
-            "Key (used as `!key` in Discord)",
+            "Key (used as `%key` in Discord)",
             placeholder="e.g. rules",
             key="pm_new_key",
         ).strip().lower()
@@ -1022,7 +1022,7 @@ def render_premade_messages_section() -> None:
 
     for idx, row in enumerate(responses):
         key = row["key"]
-        with st.expander(f"`!{key}`", expanded=False):
+        with st.expander(f"`%{key}`", expanded=False):
             edited_key = st.text_input(
                 "Key",
                 value=key,
