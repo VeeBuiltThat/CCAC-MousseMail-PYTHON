@@ -9,7 +9,7 @@ from typing import List, Dict, Any
 from urllib.parse import quote
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 try:
     from dotenv import load_dotenv
@@ -34,6 +34,22 @@ try:
     SQLALCHEMY_AVAILABLE = True
 except Exception:
     SQLALCHEMY_AVAILABLE = False
+
+
+# ---------------------------------------------------------------------------
+# Server-side session cache for 20-minute Discord login persistence.
+# Keyed by a random URL-safe token stored in st.query_params["session"].
+# ---------------------------------------------------------------------------
+_SESSION_CACHE: Dict[str, Any] = {}
+SESSION_TTL_SECONDS = 20 * 60  # 20 minutes
+
+
+def _prune_session_cache() -> None:
+    """Remove expired entries from the in-memory session cache."""
+    now = datetime.now(timezone.utc)
+    expired = [k for k, v in list(_SESSION_CACHE.items()) if v["expires_at"] < now]
+    for k in expired:
+        del _SESSION_CACHE[k]
 
 
 DEFAULT_TRANSCRIPT_DIRS = ["transcripts", "logs"]
@@ -193,6 +209,15 @@ def ensure_discord_auth() -> Dict[str, Any]:
         st.error(f"Discord OAuth is not configured. Missing: {', '.join(missing)}")
         st.stop()
 
+    # Restore session from a persistent token in the URL (survives page refresh / new tab).
+    raw_session = st.query_params.get("session", "")
+    session_token = raw_session[0] if isinstance(raw_session, list) and raw_session else str(raw_session or "")
+    if session_token and not st.session_state.discord_auth:
+        _prune_session_cache()
+        cached = _SESSION_CACHE.get(session_token)
+        if cached and cached["expires_at"] > datetime.now(timezone.utc):
+            st.session_state.discord_auth = cached["auth"]
+
     raw_code = st.query_params.get("code", "")
     raw_state = st.query_params.get("state", "")
     code = raw_code[0] if isinstance(raw_code, list) and raw_code else str(raw_code or "")
@@ -219,11 +244,21 @@ def ensure_discord_auth() -> Dict[str, Any]:
                     "(Jr. Mod, Mod, Admin, Owner, or Tech), or you are not a member of the server."
                 )
 
-            st.session_state.discord_auth = {
+            auth_data = {
                 "access_token": access_token,
                 "user": user,
             }
+            st.session_state.discord_auth = auth_data
+
+            # Persist session for 20 minutes via a URL token.
+            new_session_token = secrets.token_urlsafe(32)
+            _SESSION_CACHE[new_session_token] = {
+                "auth": auth_data,
+                "expires_at": datetime.now(timezone.utc) + timedelta(seconds=SESSION_TTL_SECONDS),
+            }
+            _prune_session_cache()
             clear_auth_query_params()
+            st.query_params["session"] = new_session_token
             st.rerun()
         except Exception as e:
             st.error(f"Discord login failed: {e}")

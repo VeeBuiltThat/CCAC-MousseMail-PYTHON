@@ -30,7 +30,20 @@ class DatabaseManager:
             database=DB_CONFIG["database"]
         )
 
+    def _ensure_connection(self):
+        try:
+            self.conn.ping(reconnect=True, attempts=3, delay=2)
+        except Exception:
+            self.conn = mysql.connector.connect(
+                host=DB_CONFIG["host"],
+                port=DB_CONFIG["port"],
+                user=DB_CONFIG["user"],
+                password=DB_CONFIG["password"],
+                database=DB_CONFIG["database"],
+            )
+
     def _new_cursor(self):
+        self._ensure_connection()
         return self.conn.cursor(dictionary=True, buffered=True)
 
     def _execute(self, query: str, params=None, *, commit: bool = False):

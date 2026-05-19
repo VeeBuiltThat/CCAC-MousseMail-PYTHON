@@ -17,7 +17,21 @@ import config as app_config
 
 GUILD_ID = getattr(app_config, "GUILD_ID", 1346839676333461625)
 STAFF_ROLE_ID = getattr(app_config, "STAFF_ROLE_ID", 1334950965408956527)
-CATEGORY_IDS = getattr(app_config, "CATEGORY_IDS", {})
+CATEGORY_IDS = getattr(app_config, "CATEGORY_IDS", {
+    "contact":      1346881466881146910,
+    "trusted":      1346882153279000648,
+    "questions":    1402347454438838443,
+    "suggestions":  1402347609460576367,
+    "partnerships": 1402347709976936591,
+    "reports":      1402347829409874032,
+    "appeals":      1402347868756643900,
+    "ko-fi":        1402348823598203061,
+    "nsfw":         1346881386510024745,
+    "tech":         1346882435400466495,
+    "emergency":    1419606665891811469,
+    "events":       1419606732971180104,
+    "acggoods":     1427241010832080997,
+})
 TICKET_MESSAGES = getattr(app_config, "TICKET_MESSAGES", [])
 TEMP_DIR = getattr(app_config, "TEMP_DIR", ".")
 LOG_DIR = getattr(app_config, "LOG_DIR", "logs")
