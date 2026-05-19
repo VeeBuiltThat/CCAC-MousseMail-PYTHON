@@ -421,7 +421,7 @@ class Modmail(commands.Cog):
         - 90m, 1h30m, 3600s
         - 15 (minutes)
         """
-        if not ctx.channel.category or ctx.channel.category.id not in self.ticket_category_ids:
+        if not ctx.channel.category or ctx.channel.category.id not in self.ticket_category_ids.values():
             await ctx.send(embed=discord.Embed(
                 description="This command can only be used in ticket channels.",
                 color=discord.Color.red(),
@@ -669,7 +669,7 @@ class Modmail(commands.Cog):
         Only log a warning if the deleted channel is a ticket channel.
         Do NOT try to fetch its history, because it's already deleted.
         """
-        if channel.category_id in self.ticket_category_ids:
+        if channel.category_id in self.ticket_category_ids.values():
             logger.warning(
                 f"Ticket channel {channel.id} in category {channel.category_id} was deleted. "
                 "Transcript generation skipped because channel no longer exists."
