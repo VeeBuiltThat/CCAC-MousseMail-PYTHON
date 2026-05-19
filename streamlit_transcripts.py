@@ -64,6 +64,19 @@ CCAC_ALLOWED_ROLE_IDS = {
     1240455108047671406,  # owner
     1243929202785386527,  # tech
 }
+
+# Roles permitted to manage premade messages via the Streamlit UI
+CCAC_ADMIN_ROLE_IDS = {
+    1243929060145631262,  # admin
+    1240455108047671406,  # owner
+    1243929202785386527,  # tech
+}
+
+
+def is_admin_user(discord_auth: dict) -> bool:
+    """Return True if the authenticated user holds an admin-or-higher role."""
+    role_ids = set(discord_auth.get("role_ids") or [])
+    return bool(role_ids.intersection(CCAC_ADMIN_ROLE_IDS))
 APP_ROOT = Path(__file__).resolve().parent
 
 # MySQL Database configuration (same as bot)
@@ -247,6 +260,7 @@ def ensure_discord_auth() -> Dict[str, Any]:
             auth_data = {
                 "access_token": access_token,
                 "user": user,
+                "role_ids": list(role_ids),
             }
             st.session_state.discord_auth = auth_data
 
@@ -797,6 +811,48 @@ def query_mysql_transcripts_map() -> Dict[str, Dict[str, Any]]:
         return {}
 
 
+# ── Premade messages (dx_responses) DB helpers ───────────────────────────────
+
+def query_dx_responses() -> List[Dict[str, str]]:
+    """Return all premade messages as [{'key': ..., 'response': ...}]."""
+    if not MYSQL_AVAILABLE:
+        return []
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT `key`, `response` FROM dx_responses ORDER BY `key` ASC")
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return [{"key": r["key"], "response": r["response"]} for r in rows]
+    except Exception:
+        return []
+
+
+def upsert_dx_response(key: str, response: str) -> None:
+    """Insert or update a premade message by key."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO dx_responses (`key`, `response`) VALUES (%s, %s) "
+        "ON DUPLICATE KEY UPDATE `response` = VALUES(`response`)",
+        (key, response),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def delete_dx_response(key: str) -> None:
+    """Delete a premade message by key."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM dx_responses WHERE `key` = %s", (key,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
 def list_transcript_files(transcript_dir: Path) -> Dict[str, Path]:
     if not transcript_dir.exists():
         return {}
@@ -909,6 +965,103 @@ def compute_staff_overview_metrics(tickets: List[Dict[str, Any]], db_transcripts
         "staff_replies": staff_replies,
         "handled_tickets": len(handled_channels),
     }
+
+
+def render_premade_messages_section() -> None:
+    """Admin-only section: view, add, edit, and delete premade responses (dx_responses)."""
+    st.subheader("Premade Messages")
+    st.caption("Changes here take effect immediately in the Discord bot (`!key` shortcuts).")
+
+    if not MYSQL_AVAILABLE:
+        st.error("mysql-connector-python is not installed.")
+        return
+
+    # ── Load ─────────────────────────────────────────────────────────────────
+    try:
+        responses = query_dx_responses()
+    except Exception as e:
+        st.error(f"Could not load premade messages: {e}")
+        return
+
+    # ── Add new message ───────────────────────────────────────────────────────
+    with st.expander("Add new premade message", expanded=not responses):
+        new_key = st.text_input(
+            "Key (used as `!key` in Discord)",
+            placeholder="e.g. rules",
+            key="pm_new_key",
+        ).strip().lower()
+        new_body = st.text_area(
+            "Message body",
+            placeholder="Type the full message text here…",
+            key="pm_new_body",
+            height=120,
+        ).strip()
+        if st.button("Save new message", key="pm_add_btn", type="primary"):
+            if not new_key:
+                st.warning("Key cannot be empty.")
+            elif not new_body:
+                st.warning("Message body cannot be empty.")
+            elif any(r["key"] == new_key for r in responses):
+                st.warning(f"Key `{new_key}` already exists — edit it in the table below.")
+            else:
+                try:
+                    upsert_dx_response(new_key, new_body)
+                    st.success(f"Premade message `{new_key}` saved.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to save: {e}")
+
+    st.divider()
+
+    # ── Edit / delete existing ────────────────────────────────────────────────
+    if not responses:
+        st.info("No premade messages yet.")
+        return
+
+    st.markdown(f"**{len(responses)} premade message{'s' if len(responses) != 1 else ''}**")
+
+    for idx, row in enumerate(responses):
+        key = row["key"]
+        with st.expander(f"`!{key}`", expanded=False):
+            edited_key = st.text_input(
+                "Key",
+                value=key,
+                key=f"pm_key_{idx}",
+            ).strip().lower()
+            edited_body = st.text_area(
+                "Message body",
+                value=row["response"],
+                key=f"pm_body_{idx}",
+                height=140,
+            ).strip()
+
+            col_save, col_del, _ = st.columns([1, 1, 3])
+
+            with col_save:
+                if st.button("Save changes", key=f"pm_save_{idx}", type="primary"):
+                    if not edited_key:
+                        st.warning("Key cannot be empty.")
+                    elif not edited_body:
+                        st.warning("Message body cannot be empty.")
+                    else:
+                        try:
+                            if edited_key != key:
+                                # Key renamed: delete old, insert new
+                                delete_dx_response(key)
+                            upsert_dx_response(edited_key, edited_body)
+                            st.success(f"Saved `{edited_key}`.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to save: {e}")
+
+            with col_del:
+                if st.button("Delete", key=f"pm_del_{idx}"):
+                    try:
+                        delete_dx_response(key)
+                        st.success(f"Deleted `{key}`.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to delete: {e}")
 
 
 def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path], db_transcripts_map: Dict[str, Dict[str, Any]]):
@@ -1182,16 +1335,24 @@ def main():
     query_section = normalize_query_value(st.query_params.get("section", ""))
     query_channel = normalize_query_value(st.query_params.get("channel", ""))
 
+    is_admin = is_admin_user(discord_auth)
+
     section_labels = {
         "overview": "Overview",
         "logs": "Logs",
         "transcript": "Transcript View",
     }
+    nav_options = ("overview", "logs", "transcript")
+
+    if is_admin:
+        section_labels["premade"] = "Premade Messages"
+        nav_options = ("overview", "logs", "transcript", "premade")
+
     default_section_key = query_section if query_section in section_labels else "logs"
     section_key = st.sidebar.radio(
         "Navigate",
-        ("overview", "logs", "transcript"),
-        index=("overview", "logs", "transcript").index(default_section_key),
+        nav_options,
+        index=nav_options.index(default_section_key),
         format_func=lambda key: section_labels[key],
         label_visibility="collapsed",
     )
@@ -1266,6 +1427,9 @@ def main():
             internal_markers,
             query_channel,
         )
+
+    elif section_key == "premade" and is_admin:
+        render_premade_messages_section()
 
 
 if __name__ == "__main__":
