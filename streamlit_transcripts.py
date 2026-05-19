@@ -1069,49 +1069,53 @@ def main():
 
     display_name = discord_user.get("global_name") or discord_user.get("username") or "Unknown user"
 
-    # Server pfp in the sidebar header
+    # ── Sidebar: identity ────────────────────────────────────────────────────
     pfp_path = APP_ROOT / "serverphoto.png"
     if pfp_path.exists():
         st.sidebar.image(Image.open(pfp_path), width=72)
-    st.sidebar.success(f"✅ Signed in as {display_name}")
-    st.sidebar.caption(f"Guild: {CCAC_MAIN_GUILD_ID} · Required roles: Jr. Mod / Mod / Admin / Owner / Tech")
-    if st.sidebar.button("Sign out"):
+    st.sidebar.success(f"✅ {display_name}")
+    if st.sidebar.button("Sign out", use_container_width=True):
         st.session_state.discord_auth = None
         st.rerun()
 
+    st.sidebar.divider()
+
+    # ── Sidebar: navigation ──────────────────────────────────────────────────
     query_section = normalize_query_value(st.query_params.get("section", ""))
     query_channel = normalize_query_value(st.query_params.get("channel", ""))
 
     section_labels = {
-        "overview": "Overview",
-        "logs": "Logs",
-        "transcript": "Transcript View",
+        "overview": "🏠  Overview",
+        "logs": "📋  Logs",
+        "transcript": "💬  Transcript View",
     }
     default_section_key = query_section if query_section in section_labels else "logs"
     section_key = st.sidebar.radio(
-        "Category",
+        "Navigate",
         ("overview", "logs", "transcript"),
         index=("overview", "logs", "transcript").index(default_section_key),
         format_func=lambda key: section_labels[key],
+        label_visibility="collapsed",
     )
 
-    staff_ids_input = st.sidebar.text_input("Staff identifier substrings (comma-separated)", value="mod,staff,admin,mousse")
-    staff_identifiers = [s.strip() for s in staff_ids_input.split(",") if s.strip()]
+    st.sidebar.divider()
 
-    internal_markers_input = st.sidebar.text_input("Internal note markers (comma-separated)", value="internal,note,staff-only")
-    internal_markers = [s.strip() for s in internal_markers_input.split(",") if s.strip()]
-
-    show_internal = st.sidebar.toggle("Show internal notes", value=False)
-
+    # ── Sidebar: advanced (collapsed) ────────────────────────────────────────
     tdir = find_dir(DEFAULT_TRANSCRIPT_DIRS)
     img_root = find_dir(DEFAULT_IMAGE_DIRS)
     transcript_map = list_transcript_files(tdir)
     db_transcripts_map = query_mysql_transcripts_map()
     tickets = query_mysql_tickets() or []
 
-    st.sidebar.caption(f"Transcripts dir: {tdir}")
-    st.sidebar.caption(f"Detected local transcripts: {len(transcript_map)}")
-    st.sidebar.caption(f"Detected DB transcripts: {len(db_transcripts_map)}")
+    with st.sidebar.expander("⚙️ Advanced", expanded=False):
+        staff_ids_input = st.text_input("Staff identifier substrings", value="mod,staff,admin,mousse", help="Comma-separated substrings used to identify staff authors in transcripts.")
+        internal_markers_input = st.text_input("Internal note markers", value="internal,note,staff-only", help="Comma-separated markers that flag a message as internal.")
+        show_internal = st.toggle("Show internal notes", value=False)
+        st.caption(f"📁 Transcripts dir: `{tdir}`")
+        st.caption(f"Local: {len(transcript_map)} · DB: {len(db_transcripts_map)}")
+
+    staff_identifiers = [s.strip() for s in staff_ids_input.split(",") if s.strip()]
+    internal_markers = [s.strip() for s in internal_markers_input.split(",") if s.strip()]
 
     if section_key == "overview":
         st.subheader("Overview")
