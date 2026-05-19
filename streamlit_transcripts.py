@@ -390,15 +390,16 @@ def inject_transcript_styles():
         """
         <style>
         .ticket-summary-card {
-            border: 1px solid rgba(255,255,255,0.12);
+            border: 1px solid rgba(192, 16, 64, 0.22);
             border-radius: 12px;
             padding: 16px;
-            background: rgba(23, 30, 52, 0.65);
+            background: #FFFFFF;
+            box-shadow: 0 2px 10px rgba(192, 16, 64, 0.08);
         }
         .ticket-summary-row {
             margin-bottom: 12px;
             padding-bottom: 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
+            border-bottom: 1px solid rgba(192, 16, 64, 0.10);
         }
         .ticket-summary-row:last-child {
             margin-bottom: 0;
@@ -407,23 +408,25 @@ def inject_transcript_styles():
         }
         .ticket-summary-label {
             font-size: 0.9rem;
-            color: #c9d1e6;
+            color: #8B0A2A;
             font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
         }
         .ticket-summary-value {
             margin-top: 4px;
-            color: #f4f6ff;
+            color: #2D0A14;
         }
         .msg-card {
-            border-left: 3px solid rgba(122, 162, 255, 0.65);
+            border-left: 3px solid rgba(192, 16, 64, 0.55);
             border-radius: 8px;
             padding: 10px 12px;
             margin: 8px 0 14px;
-            background: rgba(41, 52, 84, 0.45);
+            background: rgba(245, 216, 222, 0.35);
         }
         .msg-system {
-            border-left-color: rgba(55, 221, 161, 0.9);
-            background: rgba(31, 74, 67, 0.28);
+            border-left-color: #D86080;
+            background: rgba(216, 96, 128, 0.10);
         }
         </style>
         """,
@@ -596,9 +599,9 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
 
         # Minimal, modern bubble style
         if is_staff_msg:
-            bubble_style = "background:#26345a;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.10);color:#f4f6ff;"
+            bubble_style = "background:#7B0020;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(192,16,64,0.18);color:#FBF0F2;"
         else:
-            bubble_style = "background:#23272f;border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 8px rgba(0,0,0,0.08);color:#e6e6e6;"
+            bubble_style = "background:#FFFFFF;border:1px solid rgba(192,16,64,0.18);border-radius:10px;padding:13px 18px 13px 16px;box-shadow:0 2px 6px rgba(192,16,64,0.07);color:#2D0A14;"
 
         # Use a single column and flexbox for Discord-like alignment
         with st.container():
@@ -606,7 +609,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                 st.markdown(f'''
                 <div style="display: flex; flex-direction: row; justify-content: flex-end; align-items: flex-start; margin-bottom: 18px;">
                     <div style="display: flex; flex-direction: column; align-items: flex-end;">
-                        <div style='text-align:right;margin-bottom:2px;'><strong>{author}</strong> <span style='background:#7aa2ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>
+                        <div style='text-align:right;margin-bottom:2px;'><strong>{author}</strong> <span style='background:#C01040;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>Staff</span></div>
                         <div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;text-align:left;'>
                             {(content or '').replace(chr(10), '<br>')}
                         </div>
@@ -637,7 +640,7 @@ def render_messages_appy_style(messages: List[Dict[str, Any]], image_root: Path,
                 <div style="display: flex; flex-direction: row; justify-content: flex-start; align-items: flex-start; margin-bottom: 18px;">
                     <img src="{avatar_url}" width="44" style="border-radius:8px;margin-right:12px;object-fit:cover;" />
                     <div style="display: flex; flex-direction: column; align-items: flex-start;">
-                        <div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#a2b3ff;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>User</span></div>
+                        <div style='margin-bottom:2px;'><strong>{author}</strong> <span style='background:#D86080;color:#fff;border-radius:6px;padding:2px 8px;font-size:0.85em;margin-left:8px;'>User</span></div>
                         <div style='{bubble_style}margin-bottom:2px;min-width:60px;display:inline-block;'>
                             {(content or '').replace(chr(10), '<br>')}
                         </div>
