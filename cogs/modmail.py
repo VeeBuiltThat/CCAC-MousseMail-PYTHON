@@ -422,9 +422,8 @@ class Modmail(commands.Cog):
         - 15 (minutes)
         """
         if not ctx.channel.category or ctx.channel.category.id not in self.ticket_category_ids:
-            cat_id = ctx.channel.category.id if ctx.channel.category else "None (no category)"
             await ctx.send(embed=discord.Embed(
-                description=f"This command can only be used in ticket channels.\n\n**Debug:** Channel category ID: `{cat_id}`\nAllowed IDs: ```{sorted(self.ticket_category_ids)}```",
+                description="This command can only be used in ticket channels.",
                 color=discord.Color.red(),
                 timestamp=datetime.now(timezone.utc)
             ))
@@ -658,6 +657,8 @@ class Modmail(commands.Cog):
             ticket_channel_id = self.bot.db.get_open_ticket_channel_id(user.id)
             if ticket_channel_id:
                 guild = self.bot.get_guild(self.guild_id)
+                if not guild:
+                    return
                 ticket_channel = guild.get_channel(ticket_channel_id)
                 if ticket_channel:
                     await ticket_channel.send(f"**{user} is typing...**", delete_after=5)
