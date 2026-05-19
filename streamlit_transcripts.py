@@ -999,12 +999,81 @@ def render_transcript_view(
     with right_col:
         category = ticket.get("category") or "Transcript"
         st.markdown(f"## {category}")
-        st.write(f"Messages: **{len(messages)}**")
-        conversation_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"user", "staff"})
-        user_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"user"})
-        staff_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"staff"})
-        internal_messages = filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"internal"})
 
+        # ── Filters ─────────────────────────────────────────────────────────
+        all_authors = sorted({str(m.get("author", "")) for m in messages if m.get("author")})
+
+        fc1, fc2 = st.columns([3, 2])
+        with fc1:
+            search_query = st.text_input(
+                "Search",
+                placeholder="🔍  Search content or author…",
+                key=f"search_{selected_channel}",
+            )
+        with fc2:
+            selected_authors = st.multiselect(
+                "Author",
+                all_authors,
+                placeholder="All authors",
+                key=f"authors_{selected_channel}",
+            )
+
+        # Date range — only rendered when the conversation spans multiple days
+        ts_values = [
+            parse_iso_timestamp(m.get("timestamp") or m.get("ts", ""))
+            for m in messages
+        ]
+        valid_ts = [t for t in ts_values if t is not None]
+        date_from = date_to = None
+        date_range_changed = False
+        if valid_ts:
+            min_date = min(t.date() for t in valid_ts)
+            max_date = max(t.date() for t in valid_ts)
+            if min_date != max_date:
+                dc1, dc2, _ = st.columns([1, 1, 2])
+                date_from = dc1.date_input(
+                    "From", value=min_date, min_value=min_date, max_value=max_date,
+                    key=f"df_{selected_channel}",
+                )
+                date_to = dc2.date_input(
+                    "To", value=max_date, min_value=min_date, max_value=max_date,
+                    key=f"dt_{selected_channel}",
+                )
+                date_range_changed = date_from != min_date or date_to != max_date
+
+        filters_active = bool(search_query or selected_authors or date_range_changed)
+
+        def apply_filters(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            out = msgs
+            if search_query:
+                q = search_query.lower()
+                out = [
+                    m for m in out
+                    if q in str(m.get("content", "")).lower()
+                    or q in str(m.get("author", "")).lower()
+                ]
+            if selected_authors:
+                out = [m for m in out if str(m.get("author", "")) in selected_authors]
+            if date_from and date_to:
+                def _in_range(m: Dict[str, Any]) -> bool:
+                    ts = parse_iso_timestamp(m.get("timestamp") or m.get("ts", ""))
+                    return ts is None or date_from <= ts.date() <= date_to
+                out = [m for m in out if _in_range(m)]
+            return out
+
+        # Apply filters to each tab bucket
+        conversation_messages = apply_filters(filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"user", "staff"}))
+        user_messages         = apply_filters(filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"user"}))
+        staff_messages        = apply_filters(filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"staff"}))
+        internal_messages     = apply_filters(filter_messages_by_kind(messages, internal_markers, staff_identifiers, {"internal"}))
+
+        total_visible = len(apply_filters(messages))
+        if filters_active:
+            st.caption(f"🔎 Showing **{total_visible}** of **{len(messages)}** messages")
+        else:
+            st.caption(f"**{len(messages)}** messages total")
+
+        # ── Tabs ─────────────────────────────────────────────────────────────
         tab_conversation, tab_user, tab_staff, tab_internal = st.tabs(
             [
                 f"Conversation ({len(conversation_messages)})",
@@ -1018,25 +1087,25 @@ def render_transcript_view(
             if conversation_messages:
                 render_messages_appy_style(conversation_messages, image_root, staff_identifiers, False, internal_markers)
             else:
-                st.info("No user/staff conversation messages found.")
+                st.info("No messages match the current filters." if filters_active else "No user/staff conversation messages found.")
 
         with tab_user:
             if user_messages:
                 render_messages_appy_style(user_messages, image_root, staff_identifiers, False, internal_markers)
             else:
-                st.info("No user responses found.")
+                st.info("No messages match the current filters." if filters_active else "No user responses found.")
 
         with tab_staff:
             if staff_messages:
                 render_messages_appy_style(staff_messages, image_root, staff_identifiers, False, internal_markers)
             else:
-                st.info("No staff replies found.")
+                st.info("No messages match the current filters." if filters_active else "No staff replies found.")
 
         with tab_internal:
             if internal_messages:
                 render_messages_appy_style(internal_messages, image_root, staff_identifiers, True, internal_markers)
             else:
-                st.info("No internal messages found.")
+                st.info("No messages match the current filters." if filters_active else "No internal messages found.")
 
 
 def query_custom_url(url: str):
