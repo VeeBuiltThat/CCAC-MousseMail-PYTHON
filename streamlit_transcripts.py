@@ -930,12 +930,11 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
             mod = ticket.get("mod_username") or "Unassigned"
             created = ticket.get("created_at", "")
             category = str(ticket.get("category") or ticket.get("category_id") or "")
-            category_str = f" · 📂 {category}" if category else ""
+            category_str = f" · {category}" if category else ""
             relative_link = f"?section=transcript&channel={quote(channel_id)}"
             copy_link = f"{public_base_url}/{relative_link}" if public_base_url else relative_link
             has_transcript = channel_id in transcript_map or channel_id in db_transcripts_map
-            icon = "🟢" if str(ticket.get("status", "")).lower() == "open" else "🔴"
-            st.markdown(f"{icon} **#{channel_id}** · {member} · mod: {mod} · created: {created}{category_str}")
+            st.markdown(f"**#{channel_id}** · {member} · mod: {mod} · created: {created}{category_str}")
             col_open, col_copy = st.columns([0.25, 0.75])
             with col_open:
                 st.link_button("Open Transcript", relative_link)
@@ -1015,7 +1014,7 @@ def render_transcript_view(
         with fc1:
             search_query = st.text_input(
                 "Search",
-                placeholder="🔍  Search content or author…",
+                placeholder="Search content or author…",
                 key=f"search_{selected_channel}",
             )
         with fc2:
@@ -1077,7 +1076,7 @@ def render_transcript_view(
 
         total_visible = len(apply_filters(messages))
         if filters_active:
-            st.caption(f"🔎 Showing **{total_visible}** of **{len(messages)}** messages")
+            st.caption(f"Showing **{total_visible}** of **{len(messages)}** messages")
         else:
             st.caption(f"**{len(messages)}** messages total")
 
@@ -1140,17 +1139,32 @@ st.write("Redirect URI being used:", settings["redirect_uri"])
 def main():
     st.set_page_config(page_title="Transcript Viewer", layout="wide")
 
-    st.title("📋 Transcript Viewer")
+    st.title("Transcript Viewer")
     discord_auth = ensure_discord_auth()
     discord_user = discord_auth.get("user", {})
 
     display_name = discord_user.get("global_name") or discord_user.get("username") or "Unknown user"
 
     # ── Sidebar: identity ────────────────────────────────────────────────────
-    pfp_path = APP_ROOT / "serverphoto.png"
-    if pfp_path.exists():
-        st.sidebar.image(Image.open(pfp_path), width=72)
-    st.sidebar.success(f"✅ {display_name}")
+    user_id = discord_user.get("id", "")
+    avatar_hash = discord_user.get("avatar", "")
+    username = discord_user.get("username", "")
+    if user_id and avatar_hash:
+        avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png?size=80"
+    else:
+        avatar_url = "https://cdn.discordapp.com/embed/avatars/0.png"
+    st.sidebar.markdown(
+        f"""
+        <div style="display:flex;align-items:center;gap:12px;padding:6px 0 14px 0;">
+            <img src="{avatar_url}" width="44" height="44" style="border-radius:50%;object-fit:cover;" />
+            <div>
+                <div style="font-weight:600;font-size:0.95rem;line-height:1.3;">{display_name}</div>
+                <div style="font-size:0.78rem;opacity:0.55;">@{username}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     if st.sidebar.button("Sign out", use_container_width=True):
         st.session_state.discord_auth = None
         st.rerun()
@@ -1162,9 +1176,9 @@ def main():
     query_channel = normalize_query_value(st.query_params.get("channel", ""))
 
     section_labels = {
-        "overview": "🏠  Overview",
-        "logs": "📋  Logs",
-        "transcript": "💬  Transcript View",
+        "overview": "Overview",
+        "logs": "Logs",
+        "transcript": "Transcript View",
     }
     default_section_key = query_section if query_section in section_labels else "logs"
     section_key = st.sidebar.radio(
@@ -1184,11 +1198,11 @@ def main():
     db_transcripts_map = query_mysql_transcripts_map()
     tickets = query_mysql_tickets() or []
 
-    with st.sidebar.expander("⚙️ Advanced", expanded=False):
+    with st.sidebar.expander("Advanced", expanded=False):
         staff_ids_input = st.text_input("Staff identifier substrings", value="mod,staff,admin,mousse", help="Comma-separated substrings used to identify staff authors in transcripts.")
         internal_markers_input = st.text_input("Internal note markers", value="internal,note,staff-only", help="Comma-separated markers that flag a message as internal.")
         show_internal = st.toggle("Show internal notes", value=False)
-        st.caption(f"📁 Transcripts dir: `{tdir}`")
+        st.caption(f"Transcripts dir: `{tdir}`")
         st.caption(f"Local: {len(transcript_map)} · DB: {len(db_transcripts_map)}")
 
     staff_identifiers = [s.strip() for s in staff_ids_input.split(",") if s.strip()]
@@ -1222,7 +1236,7 @@ def main():
         b2.metric("Tickets handled", metrics["handled_tickets"])
 
         st.divider()
-        st.caption("📝 Use **Logs** to browse tickets · 💬 Use **Transcript View** to read full conversation history")
+        st.caption("Use **Logs** to browse tickets · Use **Transcript View** to read full conversation history")
 
         # Meme image — because modmail life 💀
         meme_path = APP_ROOT / "image.png"
