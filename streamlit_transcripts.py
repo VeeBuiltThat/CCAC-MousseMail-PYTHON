@@ -456,6 +456,8 @@ def render_ticket_summary_panel(ticket: Dict[str, Any], messages: List[Dict[str,
                 closed_date = dt.strftime("%Y-%m-%d")
         except Exception:
             pass
+    # Prefer human-readable category name, fall back to numeric category_id
+    category_display = str(ticket.get("category") or ticket.get("category_id") or "—")
 
     st.markdown(
         f"""
@@ -467,6 +469,10 @@ def render_ticket_summary_panel(ticket: Dict[str, Any], messages: List[Dict[str,
             <div class="ticket-summary-row">
                 <div class="ticket-summary-label">Members</div>
                 <div class="ticket-summary-value">{members_value}</div>
+            </div>
+            <div class="ticket-summary-row">
+                <div class="ticket-summary-label">Category</div>
+                <div class="ticket-summary-value">{category_display}</div>
             </div>
             <div class="ticket-summary-row">
                 <div class="ticket-summary-label">Messages</div>
@@ -923,11 +929,13 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
             member = ticket.get("member_username", "Unknown")
             mod = ticket.get("mod_username") or "Unassigned"
             created = ticket.get("created_at", "")
+            category = str(ticket.get("category") or ticket.get("category_id") or "")
+            category_str = f" · 📂 {category}" if category else ""
             relative_link = f"?section=transcript&channel={quote(channel_id)}"
             copy_link = f"{public_base_url}/{relative_link}" if public_base_url else relative_link
             has_transcript = channel_id in transcript_map or channel_id in db_transcripts_map
             icon = "🟢" if str(ticket.get("status", "")).lower() == "open" else "🔴"
-            st.markdown(f"{icon} **#{channel_id}** · {member} · mod: {mod} · created: {created}")
+            st.markdown(f"{icon} **#{channel_id}** · {member} · mod: {mod} · created: {created}{category_str}")
             col_open, col_copy = st.columns([0.25, 0.75])
             with col_open:
                 st.link_button("Open Transcript", relative_link)
