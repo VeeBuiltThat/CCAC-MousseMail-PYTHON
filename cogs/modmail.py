@@ -366,6 +366,7 @@ class Modmail(commands.Cog):
         public_base_url = (STREAMLIT_PUBLIC_URL or os.getenv("STREAMLIT_PUBLIC_URL", "")).rstrip("/")
         if public_base_url:
             transcript_url = f"{public_base_url}/?section=transcript&channel={channel.id}"
+            embed.add_field(name="Transcript", value=f"[View on Streamlit]({transcript_url})\n{transcript_url}", inline=False)
             view = discord.ui.View()
             view.add_item(discord.ui.Button(label="View transcript", url=transcript_url))
 
