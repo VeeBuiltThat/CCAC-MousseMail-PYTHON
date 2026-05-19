@@ -77,6 +77,29 @@ def is_admin_user(discord_auth: dict) -> bool:
     """Return True if the authenticated user holds an admin-or-higher role."""
     role_ids = set(discord_auth.get("role_ids") or [])
     return bool(role_ids.intersection(CCAC_ADMIN_ROLE_IDS))
+
+
+# Tech role – subset of admin that also gets the Bot Config Editor
+CCAC_TECH_ROLE_IDS = {
+    1243929202785386527,  # tech
+}
+
+# Human-readable display names for all staff role IDs
+CCAC_ROLE_NAMES: Dict[int, str] = {
+    1334289756539846656: "Jr. Mod",
+    1243559774847766619: "Mod",
+    1243929060145631262: "Admin",
+    1240455108047671406: "Owner",
+    1243929202785386527: "Tech",
+}
+
+
+def is_tech_user(discord_auth: dict) -> bool:
+    """Return True if the authenticated user holds the tech role."""
+    role_ids = set(discord_auth.get("role_ids") or [])
+    return bool(role_ids.intersection(CCAC_TECH_ROLE_IDS))
+
+
 APP_ROOT = Path(__file__).resolve().parent
 
 # MySQL Database configuration (same as bot)
@@ -853,6 +876,434 @@ def delete_dx_response(key: str) -> None:
     conn.close()
 
 
+# ── Shared connection helper ──────────────────────────────────────────────────
+
+def _new_conn():
+    """Return a fresh mysql.connector connection using DB_CONFIG."""
+    return mysql.connector.connect(**DB_CONFIG)
+
+
+# ── Table bootstrap ───────────────────────────────────────────────────────────
+
+def _ensure_table(ddl: str) -> None:
+    """Run a CREATE TABLE IF NOT EXISTS statement, silently ignoring errors."""
+    if not MYSQL_AVAILABLE:
+        return
+    try:
+        conn = _new_conn()
+        cursor = conn.cursor()
+        cursor.execute(ddl)
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception:
+        pass
+
+
+def ensure_admin_log_table() -> None:
+    _ensure_table(
+        """
+        CREATE TABLE IF NOT EXISTS admin_action_log (
+            id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+            performed_by VARCHAR(255),
+            action_type  VARCHAR(100),
+            details      TEXT,
+            performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def ensure_flagged_users_table() -> None:
+    _ensure_table(
+        """
+        CREATE TABLE IF NOT EXISTS flagged_users (
+            user_id    BIGINT PRIMARY KEY,
+            username   VARCHAR(255),
+            flag_type  VARCHAR(50) DEFAULT 'flagged',
+            reason     TEXT,
+            flagged_by VARCHAR(255),
+            flagged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def ensure_category_names_table() -> None:
+    _ensure_table(
+        """
+        CREATE TABLE IF NOT EXISTS ticket_category_names (
+            category_id   BIGINT PRIMARY KEY,
+            category_name VARCHAR(255) NOT NULL,
+            updated_by    VARCHAR(255),
+            updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+def ensure_bot_config_table() -> None:
+    _ensure_table(
+        """
+        CREATE TABLE IF NOT EXISTS bot_config_overrides (
+            `key`       VARCHAR(100) PRIMARY KEY,
+            `value`     TEXT,
+            updated_by  VARCHAR(255),
+            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+# ── Admin action log ──────────────────────────────────────────────────────────
+
+def log_admin_action(performed_by: str, action_type: str, details: str) -> None:
+    """Record an admin action in admin_action_log. Never raises."""
+    if not MYSQL_AVAILABLE:
+        return
+    try:
+        ensure_admin_log_table()
+        conn = _new_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO admin_action_log (performed_by, action_type, details) VALUES (%s, %s, %s)",
+            (performed_by, action_type, details),
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception:
+        pass
+
+
+def query_admin_action_log(limit: int = 100) -> List[Dict[str, Any]]:
+    if not MYSQL_AVAILABLE:
+        return []
+    try:
+        ensure_admin_log_table()
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, performed_by, action_type, details, performed_at "
+            "FROM admin_action_log ORDER BY performed_at DESC LIMIT %s",
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+# ── Stats queries ─────────────────────────────────────────────────────────────
+
+def query_ticket_stats() -> Dict[str, Any]:
+    """Return aggregated counts from active_tickets."""
+    if not MYSQL_AVAILABLE:
+        return {}
+    try:
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT status, COUNT(*) AS cnt FROM active_tickets GROUP BY status")
+        by_status: Dict[str, int] = {r["status"]: r["cnt"] for r in cursor.fetchall()}
+        cursor.execute(
+            "SELECT category_id, COUNT(*) AS cnt FROM active_tickets "
+            "GROUP BY category_id ORDER BY cnt DESC"
+        )
+        by_category: List[Dict[str, Any]] = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+            FROM active_tickets
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY DATE(created_at)
+            ORDER BY day
+            """
+        )
+        daily_opens: List[Dict[str, Any]] = cursor.fetchall()
+        cursor.execute(
+            """
+            SELECT AVG(TIMESTAMPDIFF(MINUTE, created_at, closed_at)) AS avg_mins
+            FROM active_tickets
+            WHERE status = 'closed'
+              AND closed_at IS NOT NULL
+              AND created_at IS NOT NULL
+            """
+        )
+        row = cursor.fetchone()
+        avg_mins = row["avg_mins"] if row and row["avg_mins"] is not None else None
+        cursor.close()
+        conn.close()
+        return {
+            "by_status": by_status,
+            "by_category": by_category,
+            "daily_opens": daily_opens,
+            "avg_resolution_hours": round(avg_mins / 60, 1) if avg_mins is not None else None,
+        }
+    except Exception:
+        return {}
+
+
+def query_staff_leaderboard() -> List[Dict[str, Any]]:
+    """Return staff ticket close counts, sorted descending."""
+    if not MYSQL_AVAILABLE:
+        return []
+    try:
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT mod_username, COUNT(*) AS closed_count
+            FROM active_tickets
+            WHERE status = 'closed'
+              AND mod_username IS NOT NULL
+              AND mod_username != ''
+            GROUP BY mod_username
+            ORDER BY closed_count DESC
+            LIMIT 25
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+def query_open_tickets_with_age() -> List[Dict[str, Any]]:
+    """Return open tickets enriched with age_hours since creation."""
+    if not MYSQL_AVAILABLE:
+        return []
+    try:
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT channel_id, user_id, member_username, mod_username,
+                   category_id, created_at,
+                   TIMESTAMPDIFF(HOUR, created_at, NOW()) AS age_hours
+            FROM active_tickets
+            WHERE status = 'open'
+            ORDER BY created_at ASC
+            """
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+# ── User search ───────────────────────────────────────────────────────────────
+
+def query_user_tickets(search_term: str) -> List[Dict[str, Any]]:
+    """Return tickets matching a username or user ID."""
+    if not MYSQL_AVAILABLE or not search_term.strip():
+        return []
+    try:
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        like_term = f"%{search_term.strip()}%"
+        try:
+            uid = int(search_term.strip())
+            cursor.execute(
+                """
+                SELECT channel_id, user_id, member_username, mod_username,
+                       category_id, created_at, closed_at, status
+                FROM active_tickets
+                WHERE user_id = %s OR member_username LIKE %s
+                ORDER BY created_at DESC LIMIT 100
+                """,
+                (uid, like_term),
+            )
+        except ValueError:
+            cursor.execute(
+                """
+                SELECT channel_id, user_id, member_username, mod_username,
+                       category_id, created_at, closed_at, status
+                FROM active_tickets
+                WHERE member_username LIKE %s
+                ORDER BY created_at DESC LIMIT 100
+                """,
+                (like_term,),
+            )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+# ── Flagged users ─────────────────────────────────────────────────────────────
+
+def query_flagged_users() -> List[Dict[str, Any]]:
+    if not MYSQL_AVAILABLE:
+        return []
+    try:
+        ensure_flagged_users_table()
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT user_id, username, flag_type, reason, flagged_by, flagged_at "
+            "FROM flagged_users ORDER BY flagged_at DESC"
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return rows
+    except Exception:
+        return []
+
+
+def upsert_flagged_user(
+    user_id: int, username: str, flag_type: str, reason: str, flagged_by: str
+) -> None:
+    ensure_flagged_users_table()
+    conn = _new_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO flagged_users (user_id, username, flag_type, reason, flagged_by, flagged_at)
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        ON DUPLICATE KEY UPDATE
+            username   = VALUES(username),
+            flag_type  = VALUES(flag_type),
+            reason     = VALUES(reason),
+            flagged_by = VALUES(flagged_by),
+            flagged_at = NOW()
+        """,
+        (user_id, username, flag_type, reason, flagged_by),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def delete_flagged_user(user_id: int) -> None:
+    conn = _new_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM flagged_users WHERE user_id = %s", (user_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+# ── Category names ────────────────────────────────────────────────────────────
+
+def query_category_names() -> Dict[int, str]:
+    """Return {category_id: friendly_name} saved by admins."""
+    if not MYSQL_AVAILABLE:
+        return {}
+    try:
+        ensure_category_names_table()
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT category_id, category_name FROM ticket_category_names")
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return {r["category_id"]: r["category_name"] for r in rows}
+    except Exception:
+        return {}
+
+
+def upsert_category_name(category_id: int, category_name: str, updated_by: str) -> None:
+    ensure_category_names_table()
+    conn = _new_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO ticket_category_names (category_id, category_name, updated_by)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            category_name = VALUES(category_name),
+            updated_by    = VALUES(updated_by)
+        """,
+        (category_id, category_name, updated_by),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def delete_category_name(category_id: int) -> None:
+    conn = _new_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM ticket_category_names WHERE category_id = %s", (category_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def query_distinct_category_ids() -> List[int]:
+    """Return all distinct category_ids in active_tickets."""
+    if not MYSQL_AVAILABLE:
+        return []
+    try:
+        conn = _new_conn()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT category_id FROM active_tickets "
+            "WHERE category_id IS NOT NULL ORDER BY category_id"
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return [r[0] for r in rows if r[0]]
+    except Exception:
+        return []
+
+
+# ── Bot config overrides ──────────────────────────────────────────────────────
+
+def query_bot_config_overrides() -> Dict[str, str]:
+    if not MYSQL_AVAILABLE:
+        return {}
+    try:
+        ensure_bot_config_table()
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT `key`, `value` FROM bot_config_overrides ORDER BY `key`")
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return {r["key"]: r["value"] for r in rows}
+    except Exception:
+        return {}
+
+
+def upsert_bot_config(key: str, value: str, updated_by: str) -> None:
+    ensure_bot_config_table()
+    conn = _new_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO bot_config_overrides (`key`, `value`, updated_by)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            `value`    = VALUES(`value`),
+            updated_by = VALUES(updated_by)
+        """,
+        (key, value, updated_by),
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+def delete_bot_config(key: str) -> None:
+    conn = _new_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM bot_config_overrides WHERE `key` = %s", (key,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
 def list_transcript_files(transcript_dir: Path) -> Dict[str, Path]:
     if not transcript_dir.exists():
         return {}
@@ -976,6 +1427,9 @@ def render_premade_messages_section() -> None:
         st.error("mysql-connector-python is not installed.")
         return
 
+    discord_auth = st.session_state.get("discord_auth") or {}
+    me = (discord_auth.get("user") or {}).get("username") or "unknown"
+
     # ── Load ─────────────────────────────────────────────────────────────────
     try:
         responses = query_dx_responses()
@@ -1006,6 +1460,7 @@ def render_premade_messages_section() -> None:
             else:
                 try:
                     upsert_dx_response(new_key, new_body)
+                    log_admin_action(me, "premade_add", f"key={new_key}")
                     st.success(f"Premade message `{new_key}` saved.")
                     st.rerun()
                 except Exception as e:
@@ -1049,6 +1504,7 @@ def render_premade_messages_section() -> None:
                                 # Key renamed: delete old, insert new
                                 delete_dx_response(key)
                             upsert_dx_response(edited_key, edited_body)
+                            log_admin_action(me, "premade_edit", f"key={edited_key}")
                             st.success(f"Saved `{edited_key}`.")
                             st.rerun()
                         except Exception as e:
@@ -1058,10 +1514,523 @@ def render_premade_messages_section() -> None:
                 if st.button("Delete", key=f"pm_del_{idx}"):
                     try:
                         delete_dx_response(key)
+                        log_admin_action(me, "premade_delete", f"key={key}")
                         st.success(f"Deleted `{key}`.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Failed to delete: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Admin dashboard sections (all require is_admin; config editor requires is_tech)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ─── 1. Stats Dashboard ───────────────────────────────────────────────────────
+
+def render_stats_dashboard() -> None:
+    st.subheader("Stats Dashboard")
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    with st.spinner("Loading stats…"):
+        stats = query_ticket_stats()
+
+    if not stats:
+        st.warning("Could not load stats from the database.")
+        return
+
+    by_status = stats.get("by_status", {})
+    open_c    = by_status.get("open", 0)
+    closed_c  = by_status.get("closed", 0)
+    total     = open_c + closed_c
+    avg_h     = stats.get("avg_resolution_hours")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Tickets",   total)
+    c2.metric("Open",            open_c)
+    c3.metric("Closed",          closed_c)
+    c4.metric("Avg Resolution",  f"{avg_h}h" if avg_h is not None else "—")
+
+    st.divider()
+
+    # Tickets by category
+    by_cat = stats.get("by_category", [])
+    if by_cat:
+        st.markdown("**Tickets by category**")
+        cat_names_db = query_category_names()
+        config_cat_map: Dict[int, str] = {}
+        if app_config:
+            try:
+                config_cat_map = {v: k for k, v in getattr(app_config, "CATEGORY_IDS", {}).items()}
+            except Exception:
+                pass
+        max_cnt = max((r["cnt"] for r in by_cat), default=1)
+        for row in by_cat[:20]:
+            cat_id   = row["category_id"] or 0
+            cat_name = cat_names_db.get(cat_id) or config_cat_map.get(cat_id) or str(cat_id)
+            st.progress(
+                min(row["cnt"] / max_cnt, 1.0),
+                text=f"**{cat_name}** — {row['cnt']} ticket{'s' if row['cnt'] != 1 else ''}",
+            )
+
+    st.divider()
+
+    # Daily ticket opens (last 30 days)
+    daily = stats.get("daily_opens", [])
+    if daily:
+        st.markdown("**Ticket opens — last 30 days**")
+        try:
+            import pandas as pd
+            df = pd.DataFrame(daily)
+            df["day"] = df["day"].astype(str)
+            df = df.set_index("day").rename(columns={"cnt": "Opens"})
+            st.bar_chart(df)
+        except Exception:
+            st.bar_chart({str(r["day"]): r["cnt"] for r in daily})
+    else:
+        st.info("No ticket data in the last 30 days.")
+
+
+# ─── 2. Staff Activity Leaderboard ───────────────────────────────────────────
+
+def render_staff_leaderboard() -> None:
+    st.subheader("Staff Activity Leaderboard")
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    with st.spinner("Loading leaderboard…"):
+        rows = query_staff_leaderboard()
+
+    if not rows:
+        st.info("No closed tickets found.")
+        return
+
+    medals = ["🥇", "🥈", "🥉"]
+    st.markdown(f"**Top {len(rows)} staff members by tickets closed**")
+    max_c = rows[0]["closed_count"] or 1
+    for i, row in enumerate(rows):
+        prefix = medals[i] if i < 3 else f"**#{i + 1}**"
+        name   = row["mod_username"] or "Unknown"
+        count  = row["closed_count"]
+        st.progress(count / max_c, text=f"{prefix} {name} — {count} closed")
+
+    st.divider()
+    try:
+        import pandas as pd
+        df = pd.DataFrame(rows).rename(
+            columns={"mod_username": "Staff", "closed_count": "Tickets Closed"}
+        ).set_index("Staff")
+        st.bar_chart(df["Tickets Closed"])
+    except Exception:
+        st.table(rows)
+
+
+# ─── 3. Open Ticket Monitor ───────────────────────────────────────────────────
+
+def render_open_tickets_monitor() -> None:
+    st.subheader("Open Ticket Monitor")
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    with st.spinner("Loading open tickets…"):
+        tickets = query_open_tickets_with_age()
+
+    if not tickets:
+        st.success("No open tickets right now.")
+        return
+
+    st.metric("Currently open", len(tickets))
+    stale = [t for t in tickets if (t.get("age_hours") or 0) >= 48]
+    if stale:
+        st.warning(
+            f"{len(stale)} ticket{'s' if len(stale) != 1 else ''} stale (≥ 48 h without a response)"
+        )
+
+    cat_names_db = query_category_names()
+    config_cat_map: Dict[int, str] = {}
+    if app_config:
+        try:
+            config_cat_map = {v: k for k, v in getattr(app_config, "CATEGORY_IDS", {}).items()}
+        except Exception:
+            pass
+
+    display = []
+    for t in tickets:
+        cat_id   = t.get("category_id")
+        cat_name = cat_names_db.get(cat_id) or config_cat_map.get(cat_id) or str(cat_id or "—")
+        age_h    = t.get("age_hours") or 0
+        display.append({
+            "Channel":  str(t.get("channel_id", "")),
+            "User":     t.get("member_username", ""),
+            "Mod":      t.get("mod_username") or "Unassigned",
+            "Category": cat_name,
+            "Age (h)":  age_h,
+            "Stale":    "⚠ yes" if age_h >= 48 else "",
+        })
+
+    try:
+        import pandas as pd
+        df = pd.DataFrame(display).sort_values("Age (h)", ascending=False)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    except Exception:
+        st.table(display)
+
+
+# ─── 4. Ticket Search by User ─────────────────────────────────────────────────
+
+def render_user_search() -> None:
+    st.subheader("Ticket Search by User")
+    st.caption("Search by Discord username or numeric user ID.")
+
+    search = st.text_input(
+        "Username or User ID",
+        placeholder="e.g. moussecake or 123456789012345678",
+        key="usr_search_q",
+    ).strip()
+
+    if not search:
+        return
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    with st.spinner("Searching…"):
+        results = query_user_tickets(search)
+
+    if not results:
+        st.info("No tickets found for that user.")
+        return
+
+    st.success(f"{len(results)} ticket{'s' if len(results) != 1 else ''} found")
+
+    for t in results:
+        channel_id = str(t.get("channel_id", ""))
+        member     = t.get("member_username", "—")
+        mod        = t.get("mod_username") or "Unassigned"
+        status     = t.get("status", "")
+        created    = str(t.get("created_at", ""))[:10]
+        closed     = str(t.get("closed_at", "") or "")[:10] or "—"
+        badge      = "🟢" if status == "open" else "⚫"
+        link       = f"?section=transcript&channel={quote(channel_id)}"
+        st.markdown(
+            f"{badge} **#{channel_id}** · user: `{member}` · mod: {mod} "
+            f"· created: {created} · closed: {closed}"
+        )
+        st.link_button("Open Transcript", link, key=f"usrlink_{channel_id}")
+        st.divider()
+
+
+# ─── 5. Banned / Flagged Users ────────────────────────────────────────────────
+
+def render_flagged_users_section() -> None:
+    st.subheader("Banned / Flagged Users")
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    discord_auth = st.session_state.get("discord_auth") or {}
+    me = (discord_auth.get("user") or {}).get("username") or "unknown"
+
+    with st.expander("Add / update flag", expanded=False):
+        f_uid  = st.text_input("Discord User ID (required)", key="fl_uid").strip()
+        f_name = st.text_input("Username (optional)", key="fl_name").strip()
+        f_type = st.selectbox("Flag type", ["flagged", "banned", "warn", "watch"], key="fl_type")
+        f_rsn  = st.text_area("Reason", key="fl_reason", height=80).strip()
+        if st.button("Save flag", key="fl_save_btn", type="primary"):
+            if not f_uid.isdigit():
+                st.warning("User ID must be a number.")
+            else:
+                try:
+                    upsert_flagged_user(int(f_uid), f_name, f_type, f_rsn, me)
+                    log_admin_action(me, "flag_user", f"type={f_type} uid={f_uid} user={f_name}: {f_rsn}")
+                    st.success(f"User {f_uid} flagged as {f_type}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Failed: {exc}")
+
+    st.divider()
+
+    with st.spinner("Loading…"):
+        flagged = query_flagged_users()
+
+    if not flagged:
+        st.info("No flagged users.")
+        return
+
+    st.markdown(f"**{len(flagged)} flagged user{'s' if len(flagged) != 1 else ''}**")
+    for row in flagged:
+        uid    = row.get("user_id")
+        uname  = row.get("username") or "—"
+        ftype  = row.get("flag_type", "flagged")
+        reason = row.get("reason") or "No reason given"
+        by_who = row.get("flagged_by") or "—"
+        at_dt  = row.get("flagged_at")
+        at_str = str(at_dt)[:10] if at_dt else "—"
+        badge  = {"banned": "🔴", "flagged": "🟠", "warn": "🟡", "watch": "🔵"}.get(ftype, "⚪")
+        with st.expander(f"{badge} `{uid}` · {uname} · {ftype}", expanded=False):
+            st.markdown(f"**Reason:** {reason}")
+            st.caption(f"Flagged by {by_who} on {at_str}")
+            if st.button("Remove flag", key=f"fl_del_{uid}"):
+                try:
+                    delete_flagged_user(int(uid))
+                    log_admin_action(me, "unflag_user", f"uid={uid} user={uname}")
+                    st.success(f"Flag removed for {uid}.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Failed: {exc}")
+
+
+# ─── 6. Category Management ───────────────────────────────────────────────────
+
+def render_category_management() -> None:
+    st.subheader("Category Management")
+    st.caption("Assign human-readable names to Discord category channel IDs used in tickets.")
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    discord_auth = st.session_state.get("discord_auth") or {}
+    me = (discord_auth.get("user") or {}).get("username") or "unknown"
+
+    # Combine IDs from config.py, DB, and saved overrides
+    config_cat_map: Dict[int, str] = {}
+    if app_config:
+        try:
+            config_cat_map = {v: k for k, v in getattr(app_config, "CATEGORY_IDS", {}).items()}
+        except Exception:
+            pass
+
+    db_ids      = query_distinct_category_ids()
+    saved_names = query_category_names()
+    all_ids: List[int] = sorted(
+        set(list(config_cat_map.keys()) + db_ids + list(saved_names.keys()))
+    )
+
+    if not all_ids:
+        st.info("No category IDs found yet — they appear once tickets are created.")
+        return
+
+    st.markdown(f"**{len(all_ids)} category ID{'s' if len(all_ids) != 1 else ''} known**")
+
+    for cat_id in all_ids:
+        default_name = saved_names.get(cat_id) or config_cat_map.get(cat_id) or ""
+        display_label = saved_names.get(cat_id) or config_cat_map.get(cat_id) or "unnamed"
+        with st.expander(f"`{cat_id}` — {display_label}", expanded=False):
+            new_name = st.text_input(
+                "Friendly name",
+                value=default_name,
+                key=f"cat_name_{cat_id}",
+            ).strip()
+            col_s, col_d, _ = st.columns([1, 1, 3])
+            with col_s:
+                if st.button("Save", key=f"cat_save_{cat_id}", type="primary"):
+                    if not new_name:
+                        st.warning("Name cannot be empty.")
+                    else:
+                        try:
+                            upsert_category_name(cat_id, new_name, me)
+                            log_admin_action(me, "rename_category", f"id={cat_id} name={new_name}")
+                            st.success(f"Saved `{new_name}` for {cat_id}.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Failed: {exc}")
+            with col_d:
+                if cat_id in saved_names:
+                    if st.button("Clear override", key=f"cat_del_{cat_id}"):
+                        try:
+                            delete_category_name(cat_id)
+                            log_admin_action(me, "clear_category_name", f"id={cat_id}")
+                            st.success("Override cleared.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Failed: {exc}")
+
+
+# ─── 7. Bot Config Editor (tech only) ────────────────────────────────────────
+
+# Keys that must never be exposed in the config editor UI
+_CONFIG_HIDDEN_KEYS = {
+    "token", "DISCORD_CLIENT_SECRET", "DISCORD_CLIENT_ID", "DISCORD_REDIRECT_URI",
+    "guild_id", "owners", "log_channel_id", "mention_channel_id", "update_channel_id",
+}
+
+
+def render_bot_config_editor() -> None:
+    st.subheader("Bot Config Editor")
+    st.caption(
+        "Tech-only. Overrides are saved to the database. "
+        "Apply them to `config/config.json` and redeploy the bot to take effect."
+    )
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    discord_auth = st.session_state.get("discord_auth") or {}
+    me = (discord_auth.get("user") or {}).get("username") or "unknown"
+
+    # Load config.json for reference
+    config_json_path = APP_ROOT / "config" / "config.json"
+    raw_config: Dict[str, Any] = {}
+    try:
+        with open(config_json_path, "r", encoding="utf-8") as fh:
+            raw_config = json.load(fh)
+    except Exception:
+        st.warning("Could not read config/config.json — showing DB overrides only.")
+
+    safe_config = {k: v for k, v in raw_config.items() if k not in _CONFIG_HIDDEN_KEYS}
+    db_overrides = query_bot_config_overrides()
+
+    # Add / update override
+    with st.expander("Add / update config override", expanded=False):
+        o_key = st.text_input("Config key", key="cfg_key").strip()
+        o_val = st.text_area("Value (JSON or plain string)", key="cfg_val", height=80).strip()
+        if st.button("Save override", key="cfg_save_btn", type="primary"):
+            if not o_key:
+                st.warning("Key cannot be empty.")
+            elif o_key in _CONFIG_HIDDEN_KEYS:
+                st.error("That key is protected and cannot be overridden here.")
+            else:
+                try:
+                    upsert_bot_config(o_key, o_val, me)
+                    log_admin_action(me, "config_override", f"key={o_key}")
+                    st.success(f"Override saved: `{o_key}`.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Failed: {exc}")
+
+    st.divider()
+
+    # Active DB overrides
+    if db_overrides:
+        st.markdown("**Active DB overrides**")
+        for k, v in sorted(db_overrides.items()):
+            with st.expander(f"`{k}`", expanded=False):
+                edited_v = st.text_area("Value", value=v, key=f"cfg_ov_{k}", height=80)
+                col_s, col_d, _ = st.columns([1, 1, 3])
+                with col_s:
+                    if st.button("Update", key=f"cfg_upd_{k}", type="primary"):
+                        try:
+                            upsert_bot_config(k, edited_v.strip(), me)
+                            log_admin_action(me, "config_override_update", f"key={k}")
+                            st.success("Updated.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Failed: {exc}")
+                with col_d:
+                    if st.button("Delete", key=f"cfg_del_{k}"):
+                        try:
+                            delete_bot_config(k)
+                            log_admin_action(me, "config_override_delete", f"key={k}")
+                            st.success("Deleted.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Failed: {exc}")
+        st.divider()
+    else:
+        st.info("No active overrides yet.")
+
+    # Reference: current config.json safe fields
+    if safe_config:
+        with st.expander("Current config.json (read-only reference)", expanded=False):
+            st.json(safe_config)
+
+
+# ─── 8. Staff Role List ───────────────────────────────────────────────────────
+
+def render_staff_roles_section() -> None:
+    st.subheader("Staff Role List")
+    st.caption("Discord role IDs and their access levels in this dashboard.")
+
+    rows = [
+        {
+            "Role":     "Jr. Mod",
+            "Role ID":  "1334289756539846656",
+            "Dashboard Access": "Viewer (Overview, Logs, Transcripts)",
+            "Admin UI": "No",
+            "Tech UI":  "No",
+        },
+        {
+            "Role":     "Mod",
+            "Role ID":  "1243559774847766619",
+            "Dashboard Access": "Viewer",
+            "Admin UI": "No",
+            "Tech UI":  "No",
+        },
+        {
+            "Role":     "Admin",
+            "Role ID":  "1243929060145631262",
+            "Dashboard Access": "Full admin dashboard",
+            "Admin UI": "Yes",
+            "Tech UI":  "No",
+        },
+        {
+            "Role":     "Owner",
+            "Role ID":  "1240455108047671406",
+            "Dashboard Access": "Full admin dashboard",
+            "Admin UI": "Yes",
+            "Tech UI":  "No",
+        },
+        {
+            "Role":     "Tech",
+            "Role ID":  "1243929202785386527",
+            "Dashboard Access": "Full admin dashboard + Bot Config Editor",
+            "Admin UI": "Yes",
+            "Tech UI":  "Yes",
+        },
+    ]
+
+    try:
+        import pandas as pd
+        df = pd.DataFrame(rows)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    except Exception:
+        st.table(rows)
+
+
+# ─── 9. Admin Action Log ──────────────────────────────────────────────────────
+
+def render_admin_log_section() -> None:
+    st.subheader("Admin Action Log")
+    st.caption("Recent actions performed through this dashboard.")
+
+    if not MYSQL_AVAILABLE:
+        st.error("MySQL not available.")
+        return
+
+    with st.spinner("Loading…"):
+        log_rows = query_admin_action_log(100)
+
+    if not log_rows:
+        st.info("No admin actions recorded yet.")
+        return
+
+    st.caption(f"Showing last {len(log_rows)} actions (newest first).")
+    display = [
+        {
+            "#":      r.get("id", ""),
+            "By":     r.get("performed_by", ""),
+            "Action": r.get("action_type", ""),
+            "Details":r.get("details", ""),
+            "Time":   str(r.get("performed_at", ""))[:19],
+        }
+        for r in log_rows
+    ]
+    try:
+        import pandas as pd
+        df = pd.DataFrame(display)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    except Exception:
+        st.table(display)
 
 
 def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path], db_transcripts_map: Dict[str, Dict[str, Any]]):
@@ -1336,23 +2305,43 @@ def main():
     query_channel = normalize_query_value(st.query_params.get("channel", ""))
 
     is_admin = is_admin_user(discord_auth)
+    is_tech  = is_tech_user(discord_auth)
 
     section_labels = {
-        "overview": "Overview",
-        "logs": "Logs",
+        "overview":   "Overview",
+        "logs":       "Logs",
         "transcript": "Transcript View",
     }
-    nav_options = ("overview", "logs", "transcript")
+    nav_options: List[str] = ["overview", "logs", "transcript"]
 
     if is_admin:
-        section_labels["premade"] = "Premade Messages"
-        nav_options = ("overview", "logs", "transcript", "premade")
+        section_labels.update({
+            "stats":       "Stats Dashboard",
+            "leaderboard": "Staff Leaderboard",
+            "open_tickets":"Open Ticket Monitor",
+            "user_search": "User Search",
+            "flagged":     "Flagged Users",
+            "categories":  "Category Management",
+            "premade":     "Premade Messages",
+            "roles":       "Staff Role List",
+            "admin_log":   "Admin Action Log",
+        })
+        nav_options.extend([
+            "stats", "leaderboard", "open_tickets", "user_search",
+            "flagged", "categories", "premade", "roles", "admin_log",
+        ])
+
+    if is_tech:
+        section_labels["config"] = "Bot Config Editor"
+        nav_options.append("config")
+
+    nav_options_tuple = tuple(nav_options)
 
     default_section_key = query_section if query_section in section_labels else "logs"
     section_key = st.sidebar.radio(
         "Navigate",
-        nav_options,
-        index=nav_options.index(default_section_key),
+        nav_options_tuple,
+        index=nav_options_tuple.index(default_section_key),
         format_func=lambda key: section_labels[key],
         label_visibility="collapsed",
     )
@@ -1430,6 +2419,33 @@ def main():
 
     elif section_key == "premade" and is_admin:
         render_premade_messages_section()
+
+    elif section_key == "stats" and is_admin:
+        render_stats_dashboard()
+
+    elif section_key == "leaderboard" and is_admin:
+        render_staff_leaderboard()
+
+    elif section_key == "open_tickets" and is_admin:
+        render_open_tickets_monitor()
+
+    elif section_key == "user_search" and is_admin:
+        render_user_search()
+
+    elif section_key == "flagged" and is_admin:
+        render_flagged_users_section()
+
+    elif section_key == "categories" and is_admin:
+        render_category_management()
+
+    elif section_key == "roles" and is_admin:
+        render_staff_roles_section()
+
+    elif section_key == "admin_log" and is_admin:
+        render_admin_log_section()
+
+    elif section_key == "config" and is_tech:
+        render_bot_config_editor()
 
 
 if __name__ == "__main__":
