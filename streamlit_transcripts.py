@@ -1063,11 +1063,6 @@ st.write("Redirect URI being used:", settings["redirect_uri"])
 def main():
     st.set_page_config(page_title="Transcript Viewer", layout="wide")
 
-    # Banner image across the full top of the page
-    banner_path = APP_ROOT / "bg.png"
-    if banner_path.exists():
-        st.image(Image.open(banner_path), use_column_width=True)
-
     st.title("📋 Transcript Viewer")
     discord_auth = ensure_discord_auth()
     discord_user = discord_auth.get("user", {})
@@ -1122,25 +1117,36 @@ def main():
         st.subheader("Overview")
         open_count = sum(1 for t in tickets if str(t.get("status", "")).lower() == "open")
         closed_count = sum(1 for t in tickets if str(t.get("status", "")).lower() == "closed")
+        total_transcripts = len(set(list(transcript_map.keys()) + list(db_transcripts_map.keys())))
         metrics = compute_staff_overview_metrics(tickets, db_transcripts_map, discord_auth)
-        st.caption(f"Personal metrics for {display_name}")
+
+        # ── Server stats ──────────────────────────────────────────────────────
+        st.markdown("**Server stats**")
         c1, c2, c3 = st.columns(3)
         c1.metric("Open tickets", open_count)
         c2.metric("Closed tickets", closed_count)
-        c3.metric("Transcripts", len(set(list(transcript_map.keys()) + list(db_transcripts_map.keys()))))
-        c4, c5, c6, c7, c8 = st.columns(5)
-        c4.metric("Your open tickets", metrics["assigned_open"])
-        c5.metric("Your closed tickets", metrics["closed_by_you"])
-        c6.metric("Your assigned closed", metrics["assigned_closed"])
-        c7.metric("Your staff replies", metrics["staff_replies"])
-        c8.metric("Tickets you handled", metrics["handled_tickets"])
-        st.write("Use **Logs** to browse ticket status and open transcript links.")
-        st.write("Use **Transcript View** to read full conversation history.")
+        c3.metric("Total transcripts", total_transcripts)
+
+        st.divider()
+
+        # ── Your activity ─────────────────────────────────────────────────────
+        st.markdown(f"**Your activity** · {display_name}")
+        a1, a2, a3 = st.columns(3)
+        a1.metric("Open assigned", metrics["assigned_open"])
+        a2.metric("Closed by you", metrics["closed_by_you"])
+        a3.metric("Assigned & closed", metrics["assigned_closed"])
+
+        b1, b2, b3 = st.columns(3)
+        b1.metric("Your replies", metrics["staff_replies"])
+        b2.metric("Tickets handled", metrics["handled_tickets"])
+
+        st.divider()
+        st.caption("📝 Use **Logs** to browse tickets · 💬 Use **Transcript View** to read full conversation history")
 
         # Meme image — because modmail life 💀
         meme_path = APP_ROOT / "image.png"
         if meme_path.exists():
-            st.markdown("---")
+            st.markdown("")
             _, meme_col, _ = st.columns([1, 2, 1])
             with meme_col:
                 st.image(Image.open(meme_path), caption="the modmail experience", use_column_width=True)
