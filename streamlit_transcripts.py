@@ -1139,7 +1139,11 @@ st.write("Redirect URI being used:", settings["redirect_uri"])
 def main():
     st.set_page_config(page_title="Transcript Viewer", layout="wide")
 
-    st.title("Transcript Viewer")
+    banner_path = APP_ROOT / "MOUSSEMAIL.png"
+    if banner_path.exists():
+        st.image(Image.open(banner_path), use_column_width=True)
+    else:
+        st.title("Transcript Viewer")
     discord_auth = ensure_discord_auth()
     discord_user = discord_auth.get("user", {})
 
