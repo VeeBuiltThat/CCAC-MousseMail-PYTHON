@@ -1062,11 +1062,22 @@ st.write("Redirect URI being used:", settings["redirect_uri"])
 
 def main():
     st.set_page_config(page_title="Transcript Viewer", layout="wide")
+
+    # Banner image across the full top of the page
+    banner_path = APP_ROOT / "bg.png"
+    if banner_path.exists():
+        st.image(Image.open(banner_path), use_column_width=True)
+
     st.title("📋 Transcript Viewer")
     discord_auth = ensure_discord_auth()
     discord_user = discord_auth.get("user", {})
 
     display_name = discord_user.get("global_name") or discord_user.get("username") or "Unknown user"
+
+    # Server pfp in the sidebar header
+    pfp_path = APP_ROOT / "serverphoto.png"
+    if pfp_path.exists():
+        st.sidebar.image(Image.open(pfp_path), width=72)
     st.sidebar.success(f"✅ Signed in as {display_name}")
     st.sidebar.caption(f"Guild: {CCAC_MAIN_GUILD_ID} · Required roles: Jr. Mod / Mod / Admin / Owner / Tech")
     if st.sidebar.button("Sign out"):
@@ -1125,6 +1136,14 @@ def main():
         c8.metric("Tickets you handled", metrics["handled_tickets"])
         st.write("Use **Logs** to browse ticket status and open transcript links.")
         st.write("Use **Transcript View** to read full conversation history.")
+
+        # Meme image — because modmail life 💀
+        meme_path = APP_ROOT / "image.png"
+        if meme_path.exists():
+            st.markdown("---")
+            _, meme_col, _ = st.columns([1, 2, 1])
+            with meme_col:
+                st.image(Image.open(meme_path), caption="the modmail experience", use_column_width=True)
 
     elif section_key == "logs":
         render_logs_view(tickets, transcript_map, db_transcripts_map)
