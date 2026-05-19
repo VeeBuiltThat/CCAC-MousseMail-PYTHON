@@ -582,7 +582,7 @@ class Modmail(commands.Cog):
     async def suspend_ticket(self, ctx: commands.Context):
         """
         Suspend: schedule an auto-close in 24 hours if the user doesn't respond.
-        This stores a suspend timer to DB if possible; otherwise it does nothing persistent.
+        The transcript is generated and sent to the log channel when the channel is deleted.
         """
         delay_seconds = 86400  # 24h
         user_id = self._get_user_id_from_topic(ctx.channel.topic or "")
@@ -595,21 +595,23 @@ class Modmail(commands.Cog):
             return
 
         execute_at_dt = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
-        db_saved = await self._try_db_add_ticket_timer(ctx.channel.id, user_id, "suspend", execute_at_dt)
-        if not db_saved:
-            logger.debug("DB suspend timer not saved; no persistent suspend scheduled for channel %s", ctx.channel.id)
+        await self._try_db_add_ticket_timer(ctx.channel.id, user_id, "suspend", execute_at_dt)
+
+        # Cancel any existing scheduled close for this channel before creating a new one
+        existing = self.delayed_closures.get(ctx.channel.id)
+        if existing:
+            existing.cancel()
+
+        task = asyncio.create_task(
+            self._delayed_close_channel(ctx.channel, delay_seconds, scheduled_by=ctx.author)
+        )
+        self.delayed_closures[ctx.channel.id] = task
 
         await ctx.send(embed=discord.Embed(
             description="🚫 Ticket suspended. Will close in 24 hours if user does not reply.",
             color=discord.Color.orange(),
             timestamp=datetime.now(timezone.utc)
         ))
-
-        # automatically log suspended ticket
-        try:
-            await self._log_ticket(ctx.channel, author=ctx.author)
-        except Exception:
-            logger.exception("Failed to log ticket during suspend for channel %s", ctx.channel.id)
 
     # ---------------- NotifyMe Role Check ----------------
 
