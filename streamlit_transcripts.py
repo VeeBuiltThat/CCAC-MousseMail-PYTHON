@@ -2308,23 +2308,23 @@ def main():
     is_tech  = is_tech_user(discord_auth)
 
     section_labels = {
-        "overview":   "Overview",
-        "logs":       "Logs",
-        "transcript": "Transcript View",
+        "overview":   "🏠  Overview",
+        "logs":       "📋  Logs",
+        "transcript": "💬  Transcript View",
     }
     nav_options: List[str] = ["overview", "logs", "transcript"]
 
     if is_admin:
         section_labels.update({
-            "stats":       "Stats Dashboard",
-            "leaderboard": "Staff Leaderboard",
-            "open_tickets":"Open Ticket Monitor",
-            "user_search": "User Search",
-            "flagged":     "Flagged Users",
-            "categories":  "Category Management",
-            "premade":     "Premade Messages",
-            "roles":       "Staff Role List",
-            "admin_log":   "Admin Action Log",
+            "stats":       "📊  Stats Dashboard",
+            "leaderboard": "🏆  Staff Leaderboard",
+            "open_tickets":"🎫  Open Ticket Monitor",
+            "user_search": "🔍  User Search",
+            "flagged":     "🚩  Flagged Users",
+            "categories":  "🗂️  Category Management",
+            "premade":     "✉️  Premade Messages",
+            "roles":       "👥  Staff Role List",
+            "admin_log":   "🗒️  Admin Action Log",
         })
         nav_options.extend([
             "stats", "leaderboard", "open_tickets", "user_search",
@@ -2332,8 +2332,57 @@ def main():
         ])
 
     if is_tech:
-        section_labels["config"] = "Bot Config Editor"
+        section_labels["config"] = "⚙️  Bot Config Editor"
         nav_options.append("config")
+
+    # ── Sidebar navigation CSS ───────────────────────────────────────────────
+    st.markdown(
+        """
+        <style>
+        /* ── Sidebar nav: pill-style radio ──────────────────────────────────── */
+        [data-testid="stSidebar"] [data-testid="stRadio"] > div {
+            gap: 2px;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] label {
+            display: flex;
+            align-items: center;
+            padding: 7px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            font-size: 0.88rem;
+            font-weight: 500;
+            color: inherit;
+            margin: 1px 0;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+            background: rgba(192, 16, 64, 0.10);
+            color: #C01040;
+        }
+        /* Hide the radio circle dot */
+        [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child {
+            display: none !important;
+        }
+        /* Active / selected item */
+        [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
+            background: rgba(192, 16, 64, 0.16);
+            color: #9A0830;
+            font-weight: 700;
+            box-shadow: inset 3px 0 0 #C01040;
+        }
+        [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked):hover {
+            background: rgba(192, 16, 64, 0.22);
+        }
+        /* Remove default radio focus ring */
+        [data-testid="stSidebar"] [data-testid="stRadio"] input[type="radio"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     nav_options_tuple = tuple(nav_options)
 
