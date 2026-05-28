@@ -2308,23 +2308,23 @@ def main():
     is_tech  = is_tech_user(discord_auth)
 
     section_labels = {
-        "overview":   "🏠  Overview",
-        "logs":       "📋  Logs",
-        "transcript": "💬  Transcript View",
+        "overview":   "Overview",
+        "logs":       "Logs",
+        "transcript": "Transcript View",
     }
     nav_options: List[str] = ["overview", "logs", "transcript"]
 
     if is_admin:
         section_labels.update({
-            "stats":       "📊  Stats Dashboard",
-            "leaderboard": "🏆  Staff Leaderboard",
-            "open_tickets":"🎫  Open Ticket Monitor",
-            "user_search": "🔍  User Search",
-            "flagged":     "🚩  Flagged Users",
-            "categories":  "🗂️  Category Management",
-            "premade":     "✉️  Premade Messages",
-            "roles":       "👥  Staff Role List",
-            "admin_log":   "🗒️  Admin Action Log",
+            "stats":       "Stats Dashboard",
+            "leaderboard": "Staff Leaderboard",
+            "open_tickets":"Open Ticket Monitor",
+            "user_search": "User Search",
+            "flagged":     "Flagged Users",
+            "categories":  "Category Management",
+            "premade":     "Premade Messages",
+            "roles":       "Staff Role List",
+            "admin_log":   "Admin Action Log",
         })
         nav_options.extend([
             "stats", "leaderboard", "open_tickets", "user_search",
@@ -2332,7 +2332,7 @@ def main():
         ])
 
     if is_tech:
-        section_labels["config"] = "⚙️  Bot Config Editor"
+        section_labels["config"] = "Bot Config Editor"
         nav_options.append("config")
 
     # ── Sidebar navigation CSS ───────────────────────────────────────────────
