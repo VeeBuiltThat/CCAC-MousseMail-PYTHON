@@ -235,6 +235,43 @@ def fetch_member_roles(user_id: str) -> set:
         return set()
 
 
+@st.cache_data(ttl=300)
+def fetch_current_staff_usernames() -> set:
+    """Return the set of lowercase usernames of members who currently hold a staff role.
+
+    Paginates through the guild member list (up to 5 000 members) and keeps only
+    those whose role list intersects CCAC_ALLOWED_ROLE_IDS.  Result is cached for
+    5 minutes so every leaderboard render doesn't hit the Discord API.
+    """
+    bot_token = get_bot_token()
+    if not bot_token:
+        return set()
+    headers = {"Authorization": f"Bot {bot_token}"}
+    usernames: set = set()
+    after = 0
+    for _ in range(5):  # max 5 pages × 1 000 = 5 000 members
+        try:
+            members = http_json(
+                f"{DISCORD_API_BASE}/guilds/{CCAC_MAIN_GUILD_ID}/members?limit=1000&after={after}",
+                headers=headers,
+            )
+            if not isinstance(members, list) or not members:
+                break
+            for m in members:
+                member_role_ids = {int(r) for r in (m.get("roles") or [])}
+                if member_role_ids.intersection(CCAC_ALLOWED_ROLE_IDS):
+                    user = m.get("user") or {}
+                    un = (user.get("username") or "").strip().lower()
+                    if un:
+                        usernames.add(un)
+            if len(members) < 1000:
+                break
+            after = int(members[-1]["user"]["id"])
+        except Exception:
+            break
+    return usernames
+
+
 def clear_auth_query_params():
     try:
         st.query_params.clear()
@@ -802,6 +839,32 @@ def query_mysql_tickets():
     except Exception as e:
         st.error(f"Connection error: {e}")
     return None
+
+
+def query_exact_ticket_counts() -> Dict[str, int]:
+    """Return exact open/closed ticket counts directly from the DB (no LIMIT)."""
+    if not MYSQL_AVAILABLE:
+        return {"open": 0, "closed": 0}
+    try:
+        conn = _new_conn()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                SUM(status = 'open')   AS open_count,
+                SUM(status = 'closed') AS closed_count
+            FROM active_tickets
+            """
+        )
+        row = cursor.fetchone() or {}
+        cursor.close()
+        conn.close()
+        return {
+            "open":   int(row.get("open_count") or 0),
+            "closed": int(row.get("closed_count") or 0),
+        }
+    except Exception:
+        return {"open": 0, "closed": 0}
 
 
 def query_mysql_transcripts_map() -> Dict[str, Dict[str, Any]]:
@@ -1647,20 +1710,33 @@ def render_stats_dashboard() -> None:
 
 def render_staff_leaderboard() -> None:
     st.subheader("Staff Activity Leaderboard")
+    st.caption("Only staff who currently hold a staff role in the Discord server are shown.")
 
     if not MYSQL_AVAILABLE:
         st.error("MySQL not available.")
         return
 
+    col_ref, _ = st.columns([1, 4])
+    with col_ref:
+        if st.button("↺ Refresh staff list", key="lb_refresh_staff"):
+            fetch_current_staff_usernames.clear()
+            st.rerun()
+
     with st.spinner("Loading leaderboard…"):
         rows = query_staff_leaderboard()
+        current_staff = fetch_current_staff_usernames()
+
+    # Filter to only staff who are currently in the server with a staff role.
+    # If the Discord API is unreachable (empty set returned), fall back to showing all.
+    if current_staff:
+        rows = [r for r in rows if (r.get("mod_username") or "").strip().lower() in current_staff]
 
     if not rows:
-        st.info("No closed tickets found.")
+        st.info("No closed tickets found for current staff members.")
         return
 
     medals = ["🥇", "🥈", "🥉"]
-    st.markdown(f"**Top {len(rows)} staff members by tickets closed**")
+    st.markdown(f"**Top {len(rows)} active staff members by tickets closed**")
     max_c = rows[0]["closed_count"] or 1
     for i, row in enumerate(rows):
         prefix = medals[i] if i < 3 else f"**#{i + 1}**"
@@ -2178,9 +2254,15 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
     open_tickets = [t for t in tickets if str(t.get("status", "")).lower() == "open"]
     closed_tickets = [t for t in tickets if str(t.get("status", "")).lower() == "closed"]
 
+    # Use exact DB counts for tab labels — the ticket list is capped at 500 rows
+    # so len(open_tickets)/len(closed_tickets) would under-report on large datasets.
+    exact_counts = query_exact_ticket_counts()
+    open_label   = f"Open ({exact_counts['open']})"
+    closed_label = f"Closed ({exact_counts['closed']})"
+
     tab_open, tab_closed, tab_monitor = st.tabs([
-        f"Open ({len(open_tickets)})",
-        f"Closed ({len(closed_tickets)})",
+        open_label,
+        closed_label,
         "Open Ticket Monitor",
     ])
 
