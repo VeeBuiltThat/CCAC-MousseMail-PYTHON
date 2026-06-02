@@ -35,6 +35,13 @@ try:
 except Exception:
     SQLALCHEMY_AVAILABLE = False
 
+try:
+    import pymysql
+    import pymysql.cursors
+    PYMYSQL_AVAILABLE = True
+except Exception:
+    PYMYSQL_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Server-side session cache for 20-minute Discord login persistence.
@@ -109,6 +116,14 @@ DB_CONFIG = {
     "user": os.getenv("DB_USER", "u1079393_bwVUJntzFf"),
     "password": os.getenv("DB_PASS", "XzaXNWotYim7AWlIeudHjSoO"),
     "database": os.getenv("DB_NAME", "s1079393_ModMail"),
+}
+
+DIXIE_DB_CONFIG = {
+    "host": os.getenv("DIXIE_DB_HOST", "gameswaw1.bisecthosting.com"),
+    "port": int(os.getenv("DIXIE_DB_PORT", "3306")),
+    "user": os.getenv("DIXIE_DB_USER", "u404394_zpDXmPyRMs"),
+    "password": os.getenv("DIXIE_DB_PASS", "s8HvVfGoqUpl9LRGVShnqzOk"),
+    "database": os.getenv("DIXIE_DB_NAME", "s404394_DixieModerator"),
 }
 
 if load_dotenv is not None:
@@ -1304,6 +1319,41 @@ def delete_bot_config(key: str) -> None:
     conn.close()
 
 
+# ── DixieModerator DB (PyMySQL) ───────────────────────────────────────────────
+
+def _get_dixie_conn():
+    """Return a PyMySQL connection to the DixieModerator database."""
+    if not PYMYSQL_AVAILABLE:
+        raise RuntimeError("pymysql is not installed. Run: pip install pymysql")
+    return pymysql.connect(
+        host=DIXIE_DB_CONFIG["host"],
+        port=DIXIE_DB_CONFIG["port"],
+        user=DIXIE_DB_CONFIG["user"],
+        password=DIXIE_DB_CONFIG["password"],
+        database=DIXIE_DB_CONFIG["database"],
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+        connect_timeout=10,
+    )
+
+
+def query_dixie_blacklist() -> List[Dict[str, Any]]:
+    """Return all rows from the DixieModerator blacklist table, newest first."""
+    try:
+        conn = _get_dixie_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, user_id, username, reason, blacklist_date "
+                "FROM blacklist ORDER BY blacklist_date DESC"
+            )
+            rows = cur.fetchall()
+        conn.close()
+        return list(rows)
+    except Exception as exc:
+        st.error(f"Blacklist DB error: {exc}")
+        return []
+
+
 def list_transcript_files(transcript_dir: Path) -> Dict[str, Path]:
     if not transcript_dir.exists():
         return {}
@@ -1786,6 +1836,54 @@ def render_flagged_users_section() -> None:
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Failed: {exc}")
+
+
+# ─── 6a. Blacklist ────────────────────────────────────────────────────────────
+
+def render_blacklist_section() -> None:
+    st.subheader("Blacklist")
+    st.caption("Read from the DixieModerator database (`s404394_DixieModerator` → `blacklist` table).")
+
+    if not PYMYSQL_AVAILABLE:
+        st.error("pymysql is not installed. Run: `pip install pymysql`")
+        return
+
+    with st.spinner("Loading blacklist…"):
+        rows = query_dixie_blacklist()
+
+    if not rows:
+        st.info("No blacklist entries found (or database is unreachable).")
+        return
+
+    # Search / filter
+    search = st.text_input("Search by username or reason", placeholder="e.g. ToxicUser or 'repeated harassment'")
+    if search:
+        term = search.lower()
+        rows = [
+            r for r in rows
+            if term in str(r.get("username", "")).lower()
+            or term in str(r.get("reason", "")).lower()
+            or str(r.get("user_id", "")) == search.strip()
+        ]
+
+    st.caption(f"{len(rows)} entr{'y' if len(rows) == 1 else 'ies'} shown")
+
+    if not rows:
+        st.info("No entries match your search.")
+        return
+
+    import pandas as pd
+    df = pd.DataFrame(rows, columns=["id", "user_id", "username", "reason", "blacklist_date"])
+    df["user_id"] = df["user_id"].astype(str)
+    df["blacklist_date"] = pd.to_datetime(df["blacklist_date"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M")
+    df = df.rename(columns={
+        "id": "ID",
+        "user_id": "User ID",
+        "username": "Username",
+        "reason": "Reason",
+        "blacklist_date": "Blacklisted On",
+    })
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ─── 6. Category Management ───────────────────────────────────────────────────
@@ -2321,6 +2419,7 @@ def main():
             "open_tickets":"Open Ticket Monitor",
             "user_search": "User Search",
             "flagged":     "Flagged Users",
+            "blacklist":   "Blacklist",
             "categories":  "Category Management",
             "premade":     "Premade Messages",
             "roles":       "Staff Role List",
@@ -2328,7 +2427,7 @@ def main():
         })
         nav_options.extend([
             "stats", "leaderboard", "open_tickets", "user_search",
-            "flagged", "categories", "premade", "roles", "admin_log",
+            "flagged", "blacklist", "categories", "premade", "roles", "admin_log",
         ])
 
     if is_tech:
@@ -2483,6 +2582,9 @@ def main():
 
     elif section_key == "flagged" and is_admin:
         render_flagged_users_section()
+
+    elif section_key == "blacklist" and is_admin:
+        render_blacklist_section()
 
     elif section_key == "categories" and is_admin:
         render_category_management()
