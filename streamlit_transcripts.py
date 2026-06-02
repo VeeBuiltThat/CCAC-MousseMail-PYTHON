@@ -2,6 +2,8 @@ import os
 import re
 import json
 import secrets
+import hashlib
+import hmac
 import streamlit as st
 from pathlib import Path
 from PIL import Image
@@ -49,6 +51,9 @@ except Exception:
 # ---------------------------------------------------------------------------
 _SESSION_CACHE: Dict[str, Any] = {}
 SESSION_TTL_SECONDS = 20 * 60  # 20 minutes
+
+# SHA-256 hash of the thesis-advisor access password (never stored as plaintext).
+_ADVISOR_PW_HASH: str = hashlib.sha256(b"VS_CSA3D1").hexdigest()
 
 
 def _prune_session_cache() -> None:
@@ -356,10 +361,39 @@ def ensure_discord_auth() -> Dict[str, Any]:
     if st.session_state.discord_auth:
         return st.session_state.discord_auth
 
+    # ── Discord login ────────────────────────────────────────────────────────
     st.sidebar.write("🔐 Staff sign-in")
     st.sidebar.caption("Sign in with Discord. Access is limited to members with the required CCAC role.")
     login_state = secrets.token_urlsafe(24)
     st.sidebar.link_button("Sign in with Discord", build_discord_login_url(login_state))
+
+    # ── Advisor password login ───────────────────────────────────────────────
+    st.sidebar.divider()
+    st.sidebar.write("🎓 Advisor access")
+    with st.sidebar.form("advisor_login_form", clear_on_submit=True):
+        _pw = st.text_input("Password", type="password", placeholder="Enter advisor password")
+        _submitted = st.form_submit_button("Sign in", use_container_width=True)
+        if _submitted:
+            _entered_hash = hashlib.sha256(_pw.encode()).hexdigest()
+            if hmac.compare_digest(_entered_hash, _ADVISOR_PW_HASH):
+                _all_role_ids = list(
+                    CCAC_ALLOWED_ROLE_IDS | CCAC_ADMIN_ROLE_IDS | CCAC_TECH_ROLE_IDS
+                )
+                st.session_state.discord_auth = {
+                    "access_token": "",
+                    "user": {
+                        "id": "0",
+                        "username": "Thesis Advisor",
+                        "global_name": "Thesis Advisor",
+                        "discriminator": "0000",
+                        "avatar": "",
+                    },
+                    "role_ids": _all_role_ids,
+                    "advisor": True,
+                }
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
     st.stop()
 
 
