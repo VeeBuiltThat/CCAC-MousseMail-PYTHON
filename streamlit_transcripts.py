@@ -2568,7 +2568,19 @@ def main():
                 query_channel,
             )
         else:
-            render_logs_view(tickets, transcript_map, db_transcripts_map)
+            logs_tab, transcripts_tab = st.tabs(["Logs", "Transcripts"])
+            with logs_tab:
+                render_logs_view(tickets, transcript_map, db_transcripts_map)
+            with transcripts_tab:
+                render_transcript_view(
+                    transcript_map,
+                    db_transcripts_map,
+                    img_root,
+                    staff_identifiers,
+                    show_internal,
+                    internal_markers,
+                    "",
+                )
 
     elif section_key == "premade" and is_admin:
         render_premade_messages_section()
