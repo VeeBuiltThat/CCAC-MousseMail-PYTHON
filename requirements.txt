@@ -8,4 +8,5 @@ pillow
 sqlalchemy
 psycopg2-binary
 mysql-connector-python
+pymysql
 pandas
