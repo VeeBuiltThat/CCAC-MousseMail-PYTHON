@@ -2461,7 +2461,6 @@ def main():
     if is_admin:
         section_labels.update({
             "stats":       "Stats & Leaderboard",
-            "flagged":     "Flagged Users",
             "blacklist":   "Blacklist",
             "categories":  "Category Management",
             "premade":     "Premade Messages",
@@ -2470,7 +2469,7 @@ def main():
         })
         nav_options.extend([
             "stats",
-            "flagged", "blacklist", "categories", "premade", "roles", "admin_log",
+            "blacklist", "categories", "premade", "roles", "admin_log",
         ])
 
     if is_tech:
@@ -2635,9 +2634,6 @@ def main():
             render_stats_dashboard()
         with leaderboard_tab:
             render_staff_leaderboard()
-
-    elif section_key == "flagged" and is_admin:
-        render_flagged_users_section()
 
     elif section_key == "blacklist" and is_admin:
         render_blacklist_section()
