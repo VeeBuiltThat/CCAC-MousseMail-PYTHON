@@ -2131,8 +2131,46 @@ def render_admin_log_section() -> None:
         st.table(display)
 
 
-def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path], db_transcripts_map: Dict[str, Dict[str, Any]]):
+def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Path], db_transcripts_map: Dict[str, Dict[str, Any]], is_admin: bool = False):
     st.subheader("Logs")
+
+    # ── Search bar (user search) ──────────────────────────────────────────────
+    search_query = st.text_input(
+        "Search tickets by username or user ID",
+        placeholder="e.g. moussecake or 123456789012345678",
+        key="logs_search_q",
+    ).strip()
+
+    if search_query:
+        if not MYSQL_AVAILABLE:
+            st.error("MySQL not available.")
+            return
+        with st.spinner("Searching…"):
+            results = query_user_tickets(search_query)
+        if not results:
+            st.info("No tickets found for that user.")
+            return
+        st.success(f"{len(results)} ticket{'s' if len(results) != 1 else ''} found")
+        public_base_url = os.getenv("STREAMLIT_PUBLIC_URL", "").rstrip("/")
+        for t in results:
+            channel_id = str(t.get("channel_id", ""))
+            member     = t.get("member_username", "—")
+            mod        = t.get("mod_username") or "Unassigned"
+            status     = t.get("status", "")
+            created    = str(t.get("created_at", ""))[:10]
+            closed     = str(t.get("closed_at", "") or "")[:10] or "—"
+            badge      = "🟢" if status == "open" else "⚫"
+            relative_link = f"?section=logs&channel={quote(channel_id)}"
+            copy_link = f"{public_base_url}/{relative_link}" if public_base_url else relative_link
+            st.markdown(f"{badge} **#{channel_id}** · user: `{member}` · mod: {mod} · created: {created} · closed: {closed}")
+            col_open, col_copy = st.columns([0.25, 0.75])
+            with col_open:
+                st.link_button("Open Transcript", relative_link, key=f"srch_link_{channel_id}")
+            with col_copy:
+                st.text_input("Copy link", value=copy_link, key=f"srch_copy_{channel_id}", label_visibility="collapsed")
+            st.divider()
+        return
+
     if not tickets:
         st.info("No tickets found in database.")
         return
@@ -2140,7 +2178,11 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
     open_tickets = [t for t in tickets if str(t.get("status", "")).lower() == "open"]
     closed_tickets = [t for t in tickets if str(t.get("status", "")).lower() == "closed"]
 
-    tab_open, tab_closed = st.tabs([f"Open ({len(open_tickets)})", f"Closed ({len(closed_tickets)})"])
+    tab_open, tab_closed, tab_monitor = st.tabs([
+        f"Open ({len(open_tickets)})",
+        f"Closed ({len(closed_tickets)})",
+        "Open Ticket Monitor",
+    ])
 
     def render_ticket_list(items: List[Dict[str, Any]]):
         if not items:
@@ -2175,6 +2217,11 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
         render_ticket_list(open_tickets)
     with tab_closed:
         render_ticket_list(closed_tickets)
+    with tab_monitor:
+        if is_admin:
+            render_open_tickets_monitor()
+        else:
+            st.info("Admin access required.")
 
 
 def render_transcript_view(
@@ -2414,8 +2461,6 @@ def main():
     if is_admin:
         section_labels.update({
             "stats":       "Stats & Leaderboard",
-            "open_tickets":"Open Ticket Monitor",
-            "user_search": "User Search",
             "flagged":     "Flagged Users",
             "blacklist":   "Blacklist",
             "categories":  "Category Management",
@@ -2424,7 +2469,7 @@ def main():
             "admin_log":   "Admin Action Log",
         })
         nav_options.extend([
-            "stats", "open_tickets", "user_search",
+            "stats",
             "flagged", "blacklist", "categories", "premade", "roles", "admin_log",
         ])
 
@@ -2569,7 +2614,7 @@ def main():
         else:
             logs_tab, transcripts_tab = st.tabs(["Logs", "Transcripts"])
             with logs_tab:
-                render_logs_view(tickets, transcript_map, db_transcripts_map)
+                render_logs_view(tickets, transcript_map, db_transcripts_map, is_admin=is_admin)
             with transcripts_tab:
                 render_transcript_view(
                     transcript_map,
@@ -2590,12 +2635,6 @@ def main():
             render_stats_dashboard()
         with leaderboard_tab:
             render_staff_leaderboard()
-
-    elif section_key == "open_tickets" and is_admin:
-        render_open_tickets_monitor()
-
-    elif section_key == "user_search" and is_admin:
-        render_user_search()
 
     elif section_key == "flagged" and is_admin:
         render_flagged_users_section()
