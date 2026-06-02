@@ -1565,10 +1565,12 @@ def compute_staff_overview_metrics(tickets: List[Dict[str, Any]], db_transcripts
     }
 
 
-def render_premade_messages_section() -> None:
+def render_premade_messages_section(is_advisor: bool = False) -> None:
     """Admin-only section: view, add, edit, and delete premade responses (dx_responses)."""
     st.subheader("Premade Messages")
     st.caption("Changes here take effect immediately in the Discord bot (`%key` shortcuts).")
+    if is_advisor:
+        st.info("👁️ View only — advisor access does not allow editing.")
 
     if not MYSQL_AVAILABLE:
         st.error("mysql-connector-python is not installed.")
@@ -1585,33 +1587,34 @@ def render_premade_messages_section() -> None:
         return
 
     # ── Add new message ───────────────────────────────────────────────────────
-    with st.expander("Add new premade message", expanded=not responses):
-        new_key = st.text_input(
-            "Key (used as `%key` in Discord)",
-            placeholder="e.g. rules",
-            key="pm_new_key",
-        ).strip().lower()
-        new_body = st.text_area(
-            "Message body",
-            placeholder="Type the full message text here…",
-            key="pm_new_body",
-            height=120,
-        ).strip()
-        if st.button("Save new message", key="pm_add_btn", type="primary"):
-            if not new_key:
-                st.warning("Key cannot be empty.")
-            elif not new_body:
-                st.warning("Message body cannot be empty.")
-            elif any(r["key"] == new_key for r in responses):
-                st.warning(f"Key `{new_key}` already exists — edit it in the table below.")
-            else:
-                try:
-                    upsert_dx_response(new_key, new_body)
-                    log_admin_action(me, "premade_add", f"key={new_key}")
-                    st.success(f"Premade message `{new_key}` saved.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to save: {e}")
+    if not is_advisor:
+        with st.expander("Add new premade message", expanded=not responses):
+            new_key = st.text_input(
+                "Key (used as `%key` in Discord)",
+                placeholder="e.g. rules",
+                key="pm_new_key",
+            ).strip().lower()
+            new_body = st.text_area(
+                "Message body",
+                placeholder="Type the full message text here…",
+                key="pm_new_body",
+                height=120,
+            ).strip()
+            if st.button("Save new message", key="pm_add_btn", type="primary"):
+                if not new_key:
+                    st.warning("Key cannot be empty.")
+                elif not new_body:
+                    st.warning("Message body cannot be empty.")
+                elif any(r["key"] == new_key for r in responses):
+                    st.warning(f"Key `{new_key}` already exists — edit it in the table below.")
+                else:
+                    try:
+                        upsert_dx_response(new_key, new_body)
+                        log_admin_action(me, "premade_add", f"key={new_key}")
+                        st.success(f"Premade message `{new_key}` saved.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to save: {e}")
 
     st.divider()
 
@@ -1625,47 +1628,50 @@ def render_premade_messages_section() -> None:
     for idx, row in enumerate(responses):
         key = row["key"]
         with st.expander(f"`%{key}`", expanded=False):
-            edited_key = st.text_input(
-                "Key",
-                value=key,
-                key=f"pm_key_{idx}",
-            ).strip().lower()
-            edited_body = st.text_area(
-                "Message body",
-                value=row["response"],
-                key=f"pm_body_{idx}",
-                height=140,
-            ).strip()
+            if is_advisor:
+                st.text(row["response"])
+            else:
+                edited_key = st.text_input(
+                    "Key",
+                    value=key,
+                    key=f"pm_key_{idx}",
+                ).strip().lower()
+                edited_body = st.text_area(
+                    "Message body",
+                    value=row["response"],
+                    key=f"pm_body_{idx}",
+                    height=140,
+                ).strip()
 
-            col_save, col_del, _ = st.columns([1, 1, 3])
+                col_save, col_del, _ = st.columns([1, 1, 3])
 
-            with col_save:
-                if st.button("Save changes", key=f"pm_save_{idx}", type="primary"):
-                    if not edited_key:
-                        st.warning("Key cannot be empty.")
-                    elif not edited_body:
-                        st.warning("Message body cannot be empty.")
-                    else:
+                with col_save:
+                    if st.button("Save changes", key=f"pm_save_{idx}", type="primary"):
+                        if not edited_key:
+                            st.warning("Key cannot be empty.")
+                        elif not edited_body:
+                            st.warning("Message body cannot be empty.")
+                        else:
+                            try:
+                                if edited_key != key:
+                                    # Key renamed: delete old, insert new
+                                    delete_dx_response(key)
+                                upsert_dx_response(edited_key, edited_body)
+                                log_admin_action(me, "premade_edit", f"key={edited_key}")
+                                st.success(f"Saved `{edited_key}`.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed to save: {e}")
+
+                with col_del:
+                    if st.button("Delete", key=f"pm_del_{idx}"):
                         try:
-                            if edited_key != key:
-                                # Key renamed: delete old, insert new
-                                delete_dx_response(key)
-                            upsert_dx_response(edited_key, edited_body)
-                            log_admin_action(me, "premade_edit", f"key={edited_key}")
-                            st.success(f"Saved `{edited_key}`.")
+                            delete_dx_response(key)
+                            log_admin_action(me, "premade_delete", f"key={key}")
+                            st.success(f"Deleted `{key}`.")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Failed to save: {e}")
-
-            with col_del:
-                if st.button("Delete", key=f"pm_del_{idx}"):
-                    try:
-                        delete_dx_response(key)
-                        log_admin_action(me, "premade_delete", f"key={key}")
-                        st.success(f"Deleted `{key}`.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Failed to delete: {e}")
+                            st.error(f"Failed to delete: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1889,8 +1895,10 @@ def render_user_search() -> None:
 
 # ─── 5. Banned / Flagged Users ────────────────────────────────────────────────
 
-def render_flagged_users_section() -> None:
+def render_flagged_users_section(is_advisor: bool = False) -> None:
     st.subheader("Banned / Flagged Users")
+    if is_advisor:
+        st.info("👁️ View only — advisor access does not allow editing.")
 
     if not MYSQL_AVAILABLE:
         st.error("MySQL not available.")
@@ -1899,22 +1907,23 @@ def render_flagged_users_section() -> None:
     discord_auth = st.session_state.get("discord_auth") or {}
     me = (discord_auth.get("user") or {}).get("username") or "unknown"
 
-    with st.expander("Add / update flag", expanded=False):
-        f_uid  = st.text_input("Discord User ID (required)", key="fl_uid").strip()
-        f_name = st.text_input("Username (optional)", key="fl_name").strip()
-        f_type = st.selectbox("Flag type", ["flagged", "banned", "warn", "watch"], key="fl_type")
-        f_rsn  = st.text_area("Reason", key="fl_reason", height=80).strip()
-        if st.button("Save flag", key="fl_save_btn", type="primary"):
-            if not f_uid.isdigit():
-                st.warning("User ID must be a number.")
-            else:
-                try:
-                    upsert_flagged_user(int(f_uid), f_name, f_type, f_rsn, me)
-                    log_admin_action(me, "flag_user", f"type={f_type} uid={f_uid} user={f_name}: {f_rsn}")
-                    st.success(f"User {f_uid} flagged as {f_type}.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Failed: {exc}")
+    if not is_advisor:
+        with st.expander("Add / update flag", expanded=False):
+            f_uid  = st.text_input("Discord User ID (required)", key="fl_uid").strip()
+            f_name = st.text_input("Username (optional)", key="fl_name").strip()
+            f_type = st.selectbox("Flag type", ["flagged", "banned", "warn", "watch"], key="fl_type")
+            f_rsn  = st.text_area("Reason", key="fl_reason", height=80).strip()
+            if st.button("Save flag", key="fl_save_btn", type="primary"):
+                if not f_uid.isdigit():
+                    st.warning("User ID must be a number.")
+                else:
+                    try:
+                        upsert_flagged_user(int(f_uid), f_name, f_type, f_rsn, me)
+                        log_admin_action(me, "flag_user", f"type={f_type} uid={f_uid} user={f_name}: {f_rsn}")
+                        st.success(f"User {f_uid} flagged as {f_type}.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Failed: {exc}")
 
     st.divider()
 
@@ -1938,14 +1947,15 @@ def render_flagged_users_section() -> None:
         with st.expander(f"{badge} `{uid}` · {uname} · {ftype}", expanded=False):
             st.markdown(f"**Reason:** {reason}")
             st.caption(f"Flagged by {by_who} on {at_str}")
-            if st.button("Remove flag", key=f"fl_del_{uid}"):
-                try:
-                    delete_flagged_user(int(uid))
-                    log_admin_action(me, "unflag_user", f"uid={uid} user={uname}")
-                    st.success(f"Flag removed for {uid}.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Failed: {exc}")
+            if not is_advisor:
+                if st.button("Remove flag", key=f"fl_del_{uid}"):
+                    try:
+                        delete_flagged_user(int(uid))
+                        log_admin_action(me, "unflag_user", f"uid={uid} user={uname}")
+                        st.success(f"Flag removed for {uid}.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Failed: {exc}")
 
 
 # ─── 6a. Blacklist ────────────────────────────────────────────────────────────
@@ -1998,9 +2008,11 @@ def render_blacklist_section() -> None:
 
 # ─── 6. Category Management ───────────────────────────────────────────────────
 
-def render_category_management() -> None:
+def render_category_management(is_advisor: bool = False) -> None:
     st.subheader("Category Management")
     st.caption("Assign human-readable names to Discord category channel IDs used in tickets.")
+    if is_advisor:
+        st.info("👁️ View only — advisor access does not allow editing.")
 
     if not MYSQL_AVAILABLE:
         st.error("MySQL not available.")
@@ -2033,34 +2045,37 @@ def render_category_management() -> None:
         default_name = saved_names.get(cat_id) or config_cat_map.get(cat_id) or ""
         display_label = saved_names.get(cat_id) or config_cat_map.get(cat_id) or "unnamed"
         with st.expander(f"`{cat_id}` — {display_label}", expanded=False):
-            new_name = st.text_input(
-                "Friendly name",
-                value=default_name,
-                key=f"cat_name_{cat_id}",
-            ).strip()
-            col_s, col_d, _ = st.columns([1, 1, 3])
-            with col_s:
-                if st.button("Save", key=f"cat_save_{cat_id}", type="primary"):
-                    if not new_name:
-                        st.warning("Name cannot be empty.")
-                    else:
-                        try:
-                            upsert_category_name(cat_id, new_name, me)
-                            log_admin_action(me, "rename_category", f"id={cat_id} name={new_name}")
-                            st.success(f"Saved `{new_name}` for {cat_id}.")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Failed: {exc}")
-            with col_d:
-                if cat_id in saved_names:
-                    if st.button("Clear override", key=f"cat_del_{cat_id}"):
-                        try:
-                            delete_category_name(cat_id)
-                            log_admin_action(me, "clear_category_name", f"id={cat_id}")
-                            st.success("Override cleared.")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Failed: {exc}")
+            if is_advisor:
+                st.caption(f"ID: {cat_id}  |  Name: {display_label}")
+            else:
+                new_name = st.text_input(
+                    "Friendly name",
+                    value=default_name,
+                    key=f"cat_name_{cat_id}",
+                ).strip()
+                col_s, col_d, _ = st.columns([1, 1, 3])
+                with col_s:
+                    if st.button("Save", key=f"cat_save_{cat_id}", type="primary"):
+                        if not new_name:
+                            st.warning("Name cannot be empty.")
+                        else:
+                            try:
+                                upsert_category_name(cat_id, new_name, me)
+                                log_admin_action(me, "rename_category", f"id={cat_id} name={new_name}")
+                                st.success(f"Saved `{new_name}` for {cat_id}.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Failed: {exc}")
+                with col_d:
+                    if cat_id in saved_names:
+                        if st.button("Clear override", key=f"cat_del_{cat_id}"):
+                            try:
+                                delete_category_name(cat_id)
+                                log_admin_action(me, "clear_category_name", f"id={cat_id}")
+                                st.success("Override cleared.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Failed: {exc}")
 
 
 # ─── 7. Bot Config Editor (tech only) ────────────────────────────────────────
@@ -2072,12 +2087,14 @@ _CONFIG_HIDDEN_KEYS = {
 }
 
 
-def render_bot_config_editor() -> None:
+def render_bot_config_editor(is_advisor: bool = False) -> None:
     st.subheader("Bot Config Editor")
     st.caption(
         "Tech-only. Overrides are saved to the database. "
         "Apply them to `config/config.json` and redeploy the bot to take effect."
     )
+    if is_advisor:
+        st.info("👁️ View only — advisor access does not allow editing.")
 
     if not MYSQL_AVAILABLE:
         st.error("MySQL not available.")
@@ -2098,23 +2115,24 @@ def render_bot_config_editor() -> None:
     safe_config = {k: v for k, v in raw_config.items() if k not in _CONFIG_HIDDEN_KEYS}
     db_overrides = query_bot_config_overrides()
 
-    # Add / update override
-    with st.expander("Add / update config override", expanded=False):
-        o_key = st.text_input("Config key", key="cfg_key").strip()
-        o_val = st.text_area("Value (JSON or plain string)", key="cfg_val", height=80).strip()
-        if st.button("Save override", key="cfg_save_btn", type="primary"):
-            if not o_key:
-                st.warning("Key cannot be empty.")
-            elif o_key in _CONFIG_HIDDEN_KEYS:
-                st.error("That key is protected and cannot be overridden here.")
-            else:
-                try:
-                    upsert_bot_config(o_key, o_val, me)
-                    log_admin_action(me, "config_override", f"key={o_key}")
-                    st.success(f"Override saved: `{o_key}`.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Failed: {exc}")
+    # Add / update override — hidden in view-only mode
+    if not is_advisor:
+        with st.expander("Add / update config override", expanded=False):
+            o_key = st.text_input("Config key", key="cfg_key").strip()
+            o_val = st.text_area("Value (JSON or plain string)", key="cfg_val", height=80).strip()
+            if st.button("Save override", key="cfg_save_btn", type="primary"):
+                if not o_key:
+                    st.warning("Key cannot be empty.")
+                elif o_key in _CONFIG_HIDDEN_KEYS:
+                    st.error("That key is protected and cannot be overridden here.")
+                else:
+                    try:
+                        upsert_bot_config(o_key, o_val, me)
+                        log_admin_action(me, "config_override", f"key={o_key}")
+                        st.success(f"Override saved: `{o_key}`.")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Failed: {exc}")
 
     st.divider()
 
@@ -2123,26 +2141,29 @@ def render_bot_config_editor() -> None:
         st.markdown("**Active DB overrides**")
         for k, v in sorted(db_overrides.items()):
             with st.expander(f"`{k}`", expanded=False):
-                edited_v = st.text_area("Value", value=v, key=f"cfg_ov_{k}", height=80)
-                col_s, col_d, _ = st.columns([1, 1, 3])
-                with col_s:
-                    if st.button("Update", key=f"cfg_upd_{k}", type="primary"):
-                        try:
-                            upsert_bot_config(k, edited_v.strip(), me)
-                            log_admin_action(me, "config_override_update", f"key={k}")
-                            st.success("Updated.")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Failed: {exc}")
-                with col_d:
-                    if st.button("Delete", key=f"cfg_del_{k}"):
-                        try:
-                            delete_bot_config(k)
-                            log_admin_action(me, "config_override_delete", f"key={k}")
-                            st.success("Deleted.")
-                            st.rerun()
-                        except Exception as exc:
-                            st.error(f"Failed: {exc}")
+                if is_advisor:
+                    st.text(v)
+                else:
+                    edited_v = st.text_area("Value", value=v, key=f"cfg_ov_{k}", height=80)
+                    col_s, col_d, _ = st.columns([1, 1, 3])
+                    with col_s:
+                        if st.button("Update", key=f"cfg_upd_{k}", type="primary"):
+                            try:
+                                upsert_bot_config(k, edited_v.strip(), me)
+                                log_admin_action(me, "config_override_update", f"key={k}")
+                                st.success("Updated.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Failed: {exc}")
+                    with col_d:
+                        if st.button("Delete", key=f"cfg_del_{k}"):
+                            try:
+                                delete_bot_config(k)
+                                log_admin_action(me, "config_override_delete", f"key={k}")
+                                st.success("Deleted.")
+                                st.rerun()
+                            except Exception as exc:
+                                st.error(f"Failed: {exc}")
         st.divider()
     else:
         st.info("No active overrides yet.")
@@ -2565,8 +2586,12 @@ def main():
     query_section = normalize_query_value(st.query_params.get("section", ""))
     query_channel = normalize_query_value(st.query_params.get("channel", ""))
 
-    is_admin = is_admin_user(discord_auth)
-    is_tech  = is_tech_user(discord_auth)
+    is_admin  = is_admin_user(discord_auth)
+    is_tech   = is_tech_user(discord_auth)
+    is_advisor = bool(discord_auth.get("advisor", False))
+
+    if is_advisor:
+        st.sidebar.info("👁️ View-only mode (Advisor)")
 
     # Build the set of sections this user can access
     _valid_sections = {"overview", "logs"}
@@ -2646,7 +2671,7 @@ def main():
             _nav_item("Stats & Leaderboard", "stats")
 
     # ── Group: Server Management ──────────────────────────────────────────────
-    if is_admin:
+    if is_admin or is_advisor:
         _sm_sections = {"categories", "premade", "blacklist"}
         with st.sidebar.expander("⚙️ Server Management", expanded=section_key in _sm_sections):
             _nav_item("Category Management", "categories")
@@ -2654,13 +2679,14 @@ def main():
             _nav_item("Blacklist", "blacklist")
 
     # ── Group: Admin ──────────────────────────────────────────────────────────
-    if is_admin or is_tech:
-        _adm_sections = {"roles", "admin_log", "config"}
+    if is_admin or is_tech or is_advisor:
+        _adm_sections = {"roles", "admin_log", "config", "flagged"}
         with st.sidebar.expander("🔐 Admin", expanded=section_key in _adm_sections):
-            if is_admin:
+            if is_admin or is_advisor:
                 _nav_item("Staff Role List", "roles")
                 _nav_item("Admin Action Log", "admin_log")
-            if is_tech:
+                _nav_item("Flagged Users", "flagged")
+            if is_tech or is_advisor:
                 _nav_item("Bot Config Editor", "config")
 
     st.sidebar.divider()
@@ -2752,8 +2778,8 @@ def main():
                     "",
                 )
 
-    elif section_key == "premade" and is_admin:
-        render_premade_messages_section()
+    elif section_key == "premade" and (is_admin or is_advisor):
+        render_premade_messages_section(is_advisor=is_advisor)
 
     elif section_key == "stats" and is_admin:
         stats_tab, leaderboard_tab = st.tabs(["Stats Dashboard", "Staff Leaderboard"])
@@ -2762,20 +2788,23 @@ def main():
         with leaderboard_tab:
             render_staff_leaderboard()
 
-    elif section_key == "blacklist" and is_admin:
+    elif section_key == "blacklist" and (is_admin or is_advisor):
         render_blacklist_section()
 
-    elif section_key == "categories" and is_admin:
-        render_category_management()
+    elif section_key == "categories" and (is_admin or is_advisor):
+        render_category_management(is_advisor=is_advisor)
 
-    elif section_key == "roles" and is_admin:
+    elif section_key == "flagged" and (is_admin or is_advisor):
+        render_flagged_users_section(is_advisor=is_advisor)
+
+    elif section_key == "roles" and (is_admin or is_advisor):
         render_staff_roles_section()
 
-    elif section_key == "admin_log" and is_admin:
+    elif section_key == "admin_log" and (is_admin or is_advisor):
         render_admin_log_section()
 
-    elif section_key == "config" and is_tech:
-        render_bot_config_editor()
+    elif section_key == "config" and (is_tech or is_advisor):
+        render_bot_config_editor(is_advisor=is_advisor)
 
 
 if __name__ == "__main__":
