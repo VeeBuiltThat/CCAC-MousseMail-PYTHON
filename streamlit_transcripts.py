@@ -2514,7 +2514,7 @@ def main():
 
     def _nav_item(label: str, key: str) -> None:
         btn_type = "primary" if section_key == key else "secondary"
-        if st.sidebar.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+        if st.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
             st.session_state["section_key"] = key
             st.query_params["section"] = key
             if "channel" in st.query_params:
