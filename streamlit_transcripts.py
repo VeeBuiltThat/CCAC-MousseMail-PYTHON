@@ -2439,7 +2439,7 @@ def main():
         """,
         unsafe_allow_html=True,
     )
-    if st.sidebar.button("Sign out", use_container_width=True):
+    if st.sidebar.button("Sign out", use_container_width=True, type="primary"):
         st.session_state.discord_auth = None
         st.rerun()
 
@@ -2471,41 +2471,41 @@ def main():
     st.markdown(
         """
         <style>
-        /* Nav buttons: base style */
-        [data-testid="stSidebar"] button[kind="secondary"] {
-            border: none !important;
-            background: transparent !important;
+        /* Nav buttons inside expanders: inactive */
+        [data-testid="stSidebar"] [data-testid="stExpander"] button[kind="secondary"] {
+            border: 1px solid rgba(192, 16, 64, 0.22) !important;
+            background: rgba(192, 16, 64, 0.06) !important;
             padding: 7px 12px !important;
             border-radius: 8px !important;
             font-size: 0.88rem !important;
             font-weight: 500 !important;
-            color: inherit !important;
+            color: #7a0028 !important;
             text-align: left !important;
             justify-content: flex-start !important;
-            transition: background 0.15s, color 0.15s !important;
-            margin: 1px 0 !important;
+            transition: background 0.15s, border-color 0.15s !important;
+            margin: 2px 0 !important;
             box-shadow: none !important;
         }
-        [data-testid="stSidebar"] button[kind="secondary"]:hover {
-            background: rgba(192, 16, 64, 0.10) !important;
-            color: #C01040 !important;
+        [data-testid="stSidebar"] [data-testid="stExpander"] button[kind="secondary"]:hover {
+            background: rgba(192, 16, 64, 0.13) !important;
+            border-color: rgba(192, 16, 64, 0.40) !important;
         }
-        /* Active nav button */
-        [data-testid="stSidebar"] button[kind="primary"] {
-            background: rgba(192, 16, 64, 0.16) !important;
+        /* Nav buttons inside expanders: active */
+        [data-testid="stSidebar"] [data-testid="stExpander"] button[kind="primary"] {
+            background: rgba(192, 16, 64, 0.18) !important;
             color: #9A0830 !important;
             font-weight: 700 !important;
             box-shadow: inset 3px 0 0 #C01040 !important;
-            border: none !important;
+            border: 1px solid rgba(192, 16, 64, 0.32) !important;
             padding: 7px 12px !important;
             border-radius: 8px !important;
             font-size: 0.88rem !important;
             text-align: left !important;
             justify-content: flex-start !important;
-            margin: 1px 0 !important;
+            margin: 2px 0 !important;
         }
-        [data-testid="stSidebar"] button[kind="primary"]:hover {
-            background: rgba(192, 16, 64, 0.22) !important;
+        [data-testid="stSidebar"] [data-testid="stExpander"] button[kind="primary"]:hover {
+            background: rgba(192, 16, 64, 0.25) !important;
         }
         </style>
         """,
