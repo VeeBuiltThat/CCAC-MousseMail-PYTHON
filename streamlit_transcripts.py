@@ -2471,16 +2471,6 @@ def main():
     st.markdown(
         """
         <style>
-        /* Nav group headers */
-        .nav-group-header {
-            font-size: 0.70rem !important;
-            font-weight: 700 !important;
-            letter-spacing: 0.08em !important;
-            text-transform: uppercase !important;
-            opacity: 0.45 !important;
-            padding: 10px 4px 2px 4px !important;
-            margin: 0 !important;
-        }
         /* Nav buttons: base style */
         [data-testid="stSidebar"] button[kind="secondary"] {
             border: none !important;
@@ -2532,27 +2522,30 @@ def main():
             st.rerun()
 
     # ── Group: Transcript Management ─────────────────────────────────────────
-    st.sidebar.markdown('<p class="nav-group-header">Transcript Management</p>', unsafe_allow_html=True)
-    _nav_item("Overview", "overview")
-    _nav_item("Logs", "logs")
-    if is_admin:
-        _nav_item("Stats & Leaderboard", "stats")
+    _tm_sections = {"overview", "logs", "stats"}
+    with st.sidebar.expander("📋 Transcript Management", expanded=section_key in _tm_sections):
+        _nav_item("Overview", "overview")
+        _nav_item("Logs", "logs")
+        if is_admin:
+            _nav_item("Stats & Leaderboard", "stats")
 
     # ── Group: Server Management ──────────────────────────────────────────────
     if is_admin:
-        st.sidebar.markdown('<p class="nav-group-header">Server Management</p>', unsafe_allow_html=True)
-        _nav_item("Category Management", "categories")
-        _nav_item("Premade Messages", "premade")
-        _nav_item("Blacklist", "blacklist")
+        _sm_sections = {"categories", "premade", "blacklist"}
+        with st.sidebar.expander("⚙️ Server Management", expanded=section_key in _sm_sections):
+            _nav_item("Category Management", "categories")
+            _nav_item("Premade Messages", "premade")
+            _nav_item("Blacklist", "blacklist")
 
     # ── Group: Admin ──────────────────────────────────────────────────────────
     if is_admin or is_tech:
-        st.sidebar.markdown('<p class="nav-group-header">Admin</p>', unsafe_allow_html=True)
-        if is_admin:
-            _nav_item("Staff Role List", "roles")
-            _nav_item("Admin Action Log", "admin_log")
-        if is_tech:
-            _nav_item("Bot Config Editor", "config")
+        _adm_sections = {"roles", "admin_log", "config"}
+        with st.sidebar.expander("🔐 Admin", expanded=section_key in _adm_sections):
+            if is_admin:
+                _nav_item("Staff Role List", "roles")
+                _nav_item("Admin Action Log", "admin_log")
+            if is_tech:
+                _nav_item("Bot Config Editor", "config")
 
     st.sidebar.divider()
 
