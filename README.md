@@ -20,6 +20,117 @@ A lightweight Discord mod-mail / ticketing bot that lets users open private tick
 ## Overview
 Users can DM the bot to open a private ticket channel inside a configured category. Staff can reply, move tickets between categories, and use premade replies.
 
+## Architecture
+
+### Class Diagram
+
+```mermaid
+classDiagram
+    class ModmailBot {
+        +config: ConfigManager
+        +db: DatabaseManager
+        +threads: ThreadManager
+        +note_manager: NoteManager
+        +guild_id: int
+        +loaded_cogs: list
+        +on_ready()
+        +on_error()
+        +on_command_error()
+        +timer_task()
+        +load_extensions()
+    }
+    class ConfigManager {
+        +cache: dict
+        +populate_cache()
+        +__getitem__(key)
+    }
+    class DatabaseManager {
+        +conn
+        +setup()
+        +open_ticket()
+        +close_ticket()
+        +get_open_ticket_channel_id()
+        +get_ticket_by_channel()
+        +save_ticket_transcript()
+        +add_note()
+        +get_notes()
+        +get_dx_response()
+        +add_dx_response()
+        +get_all_dx_responses()
+        +add_watcher()
+        +get_watchers()
+        +add_ticket_timer()
+        +cancel_ticket_timer()
+        +get_pending_timers()
+    }
+    class ThreadManager {
+        +create(user, message)
+    }
+    class NoteManager {
+        +add_note(user_id, note, staff)
+        +get_notes(user_id)
+    }
+    class Modmail {
+        <<Cog>>
+        +open_tickets: dict
+        +delayed_closures: dict
+        +suspended_tickets: dict
+        +notify_watchers: dict
+    }
+    class StaffCommands {
+        <<Cog>>
+        +NotesView
+        +TranscriptView
+    }
+    class CategoryManagement {
+        <<Cog>>
+    }
+
+    ModmailBot *-- ConfigManager
+    ModmailBot *-- DatabaseManager
+    ModmailBot *-- ThreadManager
+    ModmailBot *-- NoteManager
+    ModmailBot o-- Modmail
+    ModmailBot o-- StaffCommands
+    ModmailBot o-- CategoryManagement
+    NoteManager --> DatabaseManager : delegates to
+```
+
+### Ticket Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Bot as ModmailBot
+    participant DB as DatabaseManager
+    participant Ch as Discord Channel
+    participant Staff
+
+    User->>Bot: DM message
+    Bot->>DB: get_open_ticket_channel_id(user_id)
+    alt No open ticket
+        Bot->>DB: open_ticket(user_id, channel_id, ...)
+        Bot->>Ch: Create ticket channel
+        Bot->>Staff: Notify (ping + ClaimTicketButton)
+    else Ticket already open
+        Bot->>Ch: Forward message to existing channel
+    end
+
+    Staff->>Ch: %r <reply>
+    Bot->>User: DM reply
+
+    opt Ticket suspended
+        Bot->>Ch: %suspend
+        Bot-->>Ch: Auto-close after 24h inactivity
+    end
+
+    Staff->>Ch: %close [delay]
+    Bot->>DB: close_ticket(channel_id, closed_at)
+    Bot->>DB: save_ticket_transcript(...)
+    Bot->>Ch: Delete channel
+    Bot->>User: DM "Your ticket has been closed"
+```
+
 ## Features
 - Ticket creation via DM
 - Private ticket channels in configured categories
@@ -86,6 +197,74 @@ Then:
 - `%dx` — Show pre-made replies / canned responses.
 
 Adjust command names and behavior to match your bot's implementation if they differ.
+
+## Database Schema
+
+```mermaid
+erDiagram
+    active_tickets {
+        BIGINT id PK
+        BIGINT user_id
+        BIGINT channel_id UK
+        BIGINT category_id
+        VARCHAR status
+        BIGINT mod_id
+        VARCHAR mod_username
+        TINYINT notified
+        BIGINT open_ticket_user_id
+        DATETIME opened_at
+        DATETIME closed_at
+    }
+    ticket_transcripts {
+        BIGINT id PK
+        BIGINT channel_id UK
+        BIGINT guild_id
+        VARCHAR guild_name
+        VARCHAR channel_name
+        VARCHAR category_name
+        BIGINT owner_id
+        VARCHAR owner_name
+        VARCHAR opened_by
+        VARCHAR closed_by
+        DATETIME opened_at
+        DATETIME closed_at
+        LONGTEXT open_reason
+        LONGTEXT close_reason
+        INT message_count
+        LONGTEXT transcript_json
+        TIMESTAMP created_at
+        TIMESTAMP updated_at
+    }
+    user_notes {
+        BIGINT id PK
+        BIGINT user_id
+        LONGTEXT note
+        VARCHAR staff
+        TIMESTAMP created_at
+    }
+    dx_responses {
+        INT id PK
+        VARCHAR key UK
+        LONGTEXT response
+    }
+    ticket_timers {
+        INT id PK
+        BIGINT channel_id
+        BIGINT user_id
+        VARCHAR action
+        DATETIME execute_at
+        VARCHAR status
+    }
+    ticket_watchers {
+        BIGINT channel_id
+        BIGINT mod_id
+    }
+
+    active_tickets ||--o| ticket_transcripts : "archived on close"
+    active_tickets ||--o{ ticket_watchers : "watched by"
+    active_tickets ||--o{ ticket_timers : "scheduled actions"
+    user_notes }o--|| active_tickets : "linked via user_id"
+```
 
 ## Transcript Viewer
 A Streamlit web app for staff to view, filter, and manage ticket transcripts.

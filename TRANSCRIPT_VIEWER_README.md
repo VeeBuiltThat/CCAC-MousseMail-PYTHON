@@ -12,6 +12,35 @@ A staff-only Streamlit app for viewing and searching Discord modmail transcripts
 ✅ **Staff Authentication** – Password-protected access  
 ✅ **Attachment Links** – Clickable external attachment links  
 
+## Application Flow
+
+```mermaid
+flowchart TD
+    Login[Staff Login\npassword check] --> App[Streamlit App]
+    App --> SourceToggle{Data source?}
+
+    SourceToggle -- Local Files --> Scan[Scan DEFAULT_TRANSCRIPT_DIRS]
+    SourceToggle -- Database --> ConnStr[SQLAlchemy connection string]
+
+    Scan --> Dropdown[Transcript selector dropdown]
+    ConnStr --> DBQuery[Query transcript table\nlimit 500 messages]
+    DBQuery --> Dropdown
+
+    Dropdown --> Parser{File format?}
+    Parser -- JSON --> JSONParse[Parse structured JSON\nticket + messages array]
+    Parser -- TXT legacy --> TXTParse[Regex parse\ntimestamp author: content]
+
+    JSONParse --> Renderer[Message renderer]
+    TXTParse --> Renderer
+
+    Renderer --> ImageEmbed[Embed local images\nfrom DEFAULT_IMAGE_DIRS]
+    Renderer --> AttachLinks[Render attachment links]
+    Renderer --> StaffTag[Tag staff messages\nby author substring]
+    Renderer --> InternalFilter{Show internal notes?}
+    InternalFilter -- Yes --> ShowAll[Render all messages]
+    InternalFilter -- No --> HideInternal[Filter out flagged messages]
+```
+
 ## Setup
 
 1. **Install dependencies:**
