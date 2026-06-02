@@ -2413,8 +2413,7 @@ def main():
 
     if is_admin:
         section_labels.update({
-            "stats":       "Stats Dashboard",
-            "leaderboard": "Staff Leaderboard",
+            "stats":       "Stats & Leaderboard",
             "open_tickets":"Open Ticket Monitor",
             "user_search": "User Search",
             "flagged":     "Flagged Users",
@@ -2425,7 +2424,7 @@ def main():
             "admin_log":   "Admin Action Log",
         })
         nav_options.extend([
-            "stats", "leaderboard", "open_tickets", "user_search",
+            "stats", "open_tickets", "user_search",
             "flagged", "blacklist", "categories", "premade", "roles", "admin_log",
         ])
 
@@ -2586,10 +2585,11 @@ def main():
         render_premade_messages_section()
 
     elif section_key == "stats" and is_admin:
-        render_stats_dashboard()
-
-    elif section_key == "leaderboard" and is_admin:
-        render_staff_leaderboard()
+        stats_tab, leaderboard_tab = st.tabs(["Stats Dashboard", "Staff Leaderboard"])
+        with stats_tab:
+            render_stats_dashboard()
+        with leaderboard_tab:
+            render_staff_leaderboard()
 
     elif section_key == "open_tickets" and is_admin:
         render_open_tickets_monitor()
