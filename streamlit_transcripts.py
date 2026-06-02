@@ -1768,7 +1768,7 @@ def render_user_search() -> None:
         created    = str(t.get("created_at", ""))[:10]
         closed     = str(t.get("closed_at", "") or "")[:10] or "—"
         badge      = "🟢" if status == "open" else "⚫"
-        link       = f"?section=transcript&channel={quote(channel_id)}"
+        link       = f"?section=logs&channel={quote(channel_id)}"
         st.markdown(
             f"{badge} **#{channel_id}** · user: `{member}` · mod: {mod} "
             f"· created: {created} · closed: {closed}"
@@ -2154,7 +2154,7 @@ def render_logs_view(tickets: List[Dict[str, Any]], transcript_map: Dict[str, Pa
             created = ticket.get("created_at", "")
             category = str(ticket.get("category") or ticket.get("category_id") or "")
             category_str = f" · {category}" if category else ""
-            relative_link = f"?section=transcript&channel={quote(channel_id)}"
+            relative_link = f"?section=logs&channel={quote(channel_id)}"
             copy_link = f"{public_base_url}/{relative_link}" if public_base_url else relative_link
             has_transcript = channel_id in transcript_map or channel_id in db_transcripts_map
             st.markdown(f"**#{channel_id}** · {member} · mod: {mod} · created: {created}{category_str}")
@@ -2408,9 +2408,8 @@ def main():
     section_labels = {
         "overview":   "Overview",
         "logs":       "Logs",
-        "transcript": "Transcript View",
     }
-    nav_options: List[str] = ["overview", "logs", "transcript"]
+    nav_options: List[str] = ["overview", "logs"]
 
     if is_admin:
         section_labels.update({
@@ -2485,7 +2484,7 @@ def main():
 
     nav_options_tuple = tuple(nav_options)
 
-    default_section_key = query_section if query_section in section_labels else "logs"
+    default_section_key = "logs" if query_section == "transcript" else (query_section if query_section in section_labels else "logs")
     section_key = st.sidebar.radio(
         "Navigate",
         nav_options_tuple,
@@ -2541,7 +2540,7 @@ def main():
         b2.metric("Tickets handled", metrics["handled_tickets"])
 
         st.divider()
-        st.caption("Use **Logs** to browse tickets · Use **Transcript View** to read full conversation history")
+        st.caption("Use **Logs** to browse tickets and open full transcripts")
 
         # Meme image — because modmail life 💀
         meme_path = APP_ROOT / "image.png"
@@ -2552,18 +2551,24 @@ def main():
                 st.image(Image.open(meme_path), caption="the modmail experience", use_column_width=True)
 
     elif section_key == "logs":
-        render_logs_view(tickets, transcript_map, db_transcripts_map)
-
-    elif section_key == "transcript":
-        render_transcript_view(
-            transcript_map,
-            db_transcripts_map,
-            img_root,
-            staff_identifiers,
-            show_internal,
-            internal_markers,
-            query_channel,
-        )
+        if query_channel:
+            if st.button("← Back to Logs"):
+                try:
+                    del st.query_params["channel"]
+                except Exception:
+                    pass
+                st.rerun()
+            render_transcript_view(
+                transcript_map,
+                db_transcripts_map,
+                img_root,
+                staff_identifiers,
+                show_internal,
+                internal_markers,
+                query_channel,
+            )
+        else:
+            render_logs_view(tickets, transcript_map, db_transcripts_map)
 
     elif section_key == "premade" and is_admin:
         render_premade_messages_section()
