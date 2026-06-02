@@ -2452,89 +2452,107 @@ def main():
     is_admin = is_admin_user(discord_auth)
     is_tech  = is_tech_user(discord_auth)
 
-    section_labels = {
-        "overview":   "Overview",
-        "logs":       "Logs",
-    }
-    nav_options: List[str] = ["overview", "logs"]
-
+    # Build the set of sections this user can access
+    _valid_sections = {"overview", "logs"}
     if is_admin:
-        section_labels.update({
-            "stats":       "Stats & Leaderboard",
-            "blacklist":   "Blacklist",
-            "categories":  "Category Management",
-            "premade":     "Premade Messages",
-            "roles":       "Staff Role List",
-            "admin_log":   "Admin Action Log",
-        })
-        nav_options.extend([
-            "stats",
-            "blacklist", "categories", "premade", "roles", "admin_log",
-        ])
-
+        _valid_sections.update({"stats", "blacklist", "categories", "premade", "roles", "admin_log"})
     if is_tech:
-        section_labels["config"] = "Bot Config Editor"
-        nav_options.append("config")
+        _valid_sections.add("config")
+
+    # Resolve section from URL (source of truth) then fall back to session state
+    _qs = "logs" if query_section == "transcript" else (query_section if query_section in _valid_sections else "")
+    if _qs:
+        section_key = _qs
+    else:
+        section_key = st.session_state.get("section_key", "logs")
+    st.session_state["section_key"] = section_key
 
     # ── Sidebar navigation CSS ───────────────────────────────────────────────
     st.markdown(
         """
         <style>
-        /* ── Sidebar nav: pill-style radio ──────────────────────────────────── */
-        [data-testid="stSidebar"] [data-testid="stRadio"] > div {
-            gap: 2px;
+        /* Nav group headers */
+        .nav-group-header {
+            font-size: 0.70rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.08em !important;
+            text-transform: uppercase !important;
+            opacity: 0.45 !important;
+            padding: 10px 4px 2px 4px !important;
+            margin: 0 !important;
         }
-        [data-testid="stSidebar"] [data-testid="stRadio"] label {
-            display: flex;
-            align-items: center;
-            padding: 7px 12px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background 0.15s, color 0.15s;
-            font-size: 0.88rem;
-            font-weight: 500;
-            color: inherit;
-            margin: 1px 0;
+        /* Nav buttons: base style */
+        [data-testid="stSidebar"] button[kind="secondary"] {
+            border: none !important;
+            background: transparent !important;
+            padding: 7px 12px !important;
+            border-radius: 8px !important;
+            font-size: 0.88rem !important;
+            font-weight: 500 !important;
+            color: inherit !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            transition: background 0.15s, color 0.15s !important;
+            margin: 1px 0 !important;
+            box-shadow: none !important;
         }
-        [data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
-            background: rgba(192, 16, 64, 0.10);
-            color: #C01040;
+        [data-testid="stSidebar"] button[kind="secondary"]:hover {
+            background: rgba(192, 16, 64, 0.10) !important;
+            color: #C01040 !important;
         }
-        /* Hide the radio circle dot */
-        [data-testid="stSidebar"] [data-testid="stRadio"] label > div:first-child {
-            display: none !important;
+        /* Active nav button */
+        [data-testid="stSidebar"] button[kind="primary"] {
+            background: rgba(192, 16, 64, 0.16) !important;
+            color: #9A0830 !important;
+            font-weight: 700 !important;
+            box-shadow: inset 3px 0 0 #C01040 !important;
+            border: none !important;
+            padding: 7px 12px !important;
+            border-radius: 8px !important;
+            font-size: 0.88rem !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            margin: 1px 0 !important;
         }
-        /* Active / selected item */
-        [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked) {
-            background: rgba(192, 16, 64, 0.16);
-            color: #9A0830;
-            font-weight: 700;
-            box-shadow: inset 3px 0 0 #C01040;
-        }
-        [data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked):hover {
-            background: rgba(192, 16, 64, 0.22);
-        }
-        /* Remove default radio focus ring */
-        [data-testid="stSidebar"] [data-testid="stRadio"] input[type="radio"] {
-            position: absolute;
-            opacity: 0;
-            pointer-events: none;
+        [data-testid="stSidebar"] button[kind="primary"]:hover {
+            background: rgba(192, 16, 64, 0.22) !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    nav_options_tuple = tuple(nav_options)
+    def _nav_item(label: str, key: str) -> None:
+        btn_type = "primary" if section_key == key else "secondary"
+        if st.sidebar.button(label, key=f"nav_{key}", use_container_width=True, type=btn_type):
+            st.session_state["section_key"] = key
+            st.query_params["section"] = key
+            if "channel" in st.query_params:
+                del st.query_params["channel"]
+            st.rerun()
 
-    default_section_key = "logs" if query_section == "transcript" else (query_section if query_section in section_labels else "logs")
-    section_key = st.sidebar.radio(
-        "Navigate",
-        nav_options_tuple,
-        index=nav_options_tuple.index(default_section_key),
-        format_func=lambda key: section_labels[key],
-        label_visibility="collapsed",
-    )
+    # ── Group: Transcript Management ─────────────────────────────────────────
+    st.sidebar.markdown('<p class="nav-group-header">Transcript Management</p>', unsafe_allow_html=True)
+    _nav_item("Overview", "overview")
+    _nav_item("Logs", "logs")
+    if is_admin:
+        _nav_item("Stats & Leaderboard", "stats")
+
+    # ── Group: Server Management ──────────────────────────────────────────────
+    if is_admin:
+        st.sidebar.markdown('<p class="nav-group-header">Server Management</p>', unsafe_allow_html=True)
+        _nav_item("Category Management", "categories")
+        _nav_item("Premade Messages", "premade")
+        _nav_item("Blacklist", "blacklist")
+
+    # ── Group: Admin ──────────────────────────────────────────────────────────
+    if is_admin or is_tech:
+        st.sidebar.markdown('<p class="nav-group-header">Admin</p>', unsafe_allow_html=True)
+        if is_admin:
+            _nav_item("Staff Role List", "roles")
+            _nav_item("Admin Action Log", "admin_log")
+        if is_tech:
+            _nav_item("Bot Config Editor", "config")
 
     st.sidebar.divider()
 
